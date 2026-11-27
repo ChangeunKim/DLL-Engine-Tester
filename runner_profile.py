@@ -122,6 +122,135 @@ def mem_event():
     return {'private': p, 'rss': r}
 
 
+class HEAP_SUMMARY(ctypes.Structure):
+    _fields_ = [('cb', wintypes.DWORD),
+                ('cbAllocated', ctypes.c_size_t),
+                ('cbCommitted', ctypes.c_size_t),
+                ('cbReserved', ctypes.c_size_t),
+                ('cbMaxReserve', ctypes.c_size_t)]
+
+
+class HeapMeter:
+    """Live vs committed bytes across every heap in the process.
+
+    Private bytes mixes heap pages with stacks, VirtualAlloc regions and Python's own
+    arenas, and the allocator hands pages back to the OS on its own schedule, so a
+    steady leak can read as a staircase. HeapSummary reports what the heaps actually
+    *hold allocated* right now (cbAllocated) separately from what they merely keep
+    committed (cbCommitted), which is the question a leak hunt is really asking.
+
+    Everything is preallocated: a measurement must not allocate per call.
+    """
+
+    MAX_HEAPS = 512
+
+    def __init__(self, exclude=()):
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        k32.GetProcessHeaps.argtypes = [wintypes.DWORD, POINTER(wintypes.HANDLE)]
+        k32.GetProcessHeaps.restype = wintypes.DWORD
+        k32.HeapSummary.argtypes = [wintypes.HANDLE, wintypes.DWORD, POINTER(HEAP_SUMMARY)]
+        k32.HeapSummary.restype = wintypes.BOOL
+        self._k32 = k32
+        self._handles = (wintypes.HANDLE * self.MAX_HEAPS)()
+        self._sum = HEAP_SUMMARY()
+        self._exclude = set(int(x) for x in exclude if x)
+        self.available = False
+        try:
+            a, c, ok = self._read()
+            self.available = ok > 0
+        except Exception:
+            self.available = False
+
+    def _read(self):
+        n = min(self._k32.GetProcessHeaps(self.MAX_HEAPS, self._handles), self.MAX_HEAPS)
+        alloc = commit = ok = 0
+        s = self._sum
+        for i in range(n):
+            h = self._handles[i]
+            if h is None or int(h) in self._exclude:
+                continue
+            s.cb = ctypes.sizeof(s)
+            if self._k32.HeapSummary(h, 0, ctypes.byref(s)):
+                alloc += s.cbAllocated
+                commit += s.cbCommitted
+                ok += 1
+        return alloc, commit, ok
+
+    def read(self):
+        """-> (allocated, committed) summed over all readable heaps."""
+        a, c, _ = self._read()
+        return a, c
+
+
+class CycleClock:
+    """Per-thread CPU time from QueryThreadCycleTime.
+
+    GetThreadTimes / time.thread_time() only advance in 15.6 ms scheduler ticks, which
+    reads 0 ms for most DLL calls. The cycle counter is exact; it is converted to
+    milliseconds with a factor calibrated against the wall clock on a busy spin.
+    """
+
+    def __init__(self):
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        k32.GetCurrentThread.restype = wintypes.HANDLE
+        k32.QueryThreadCycleTime.argtypes = [wintypes.HANDLE, POINTER(ctypes.c_ulonglong)]
+        k32.QueryThreadCycleTime.restype = wintypes.BOOL
+        self._k32 = k32
+        self._thread = k32.GetCurrentThread()
+        self._buf = ctypes.c_ulonglong()
+        self.cycles_per_ms = 0.0
+        self.available = False
+        try:
+            c0 = self.cycles()
+            t0 = time.perf_counter()
+            while time.perf_counter() - t0 < 0.04:
+                pass
+            dc = self.cycles() - c0
+            dt = (time.perf_counter() - t0) * 1000.0
+            if dc > 0 and dt > 0:
+                self.cycles_per_ms = dc / dt
+                self.available = True
+        except Exception:
+            pass
+
+    def cycles(self):
+        self._k32.QueryThreadCycleTime(self._thread, ctypes.byref(self._buf))
+        return self._buf.value
+
+    def to_ms(self, cycles):
+        return cycles / self.cycles_per_ms if self.cycles_per_ms else 0.0
+
+
+def percentile(sorted_vals, q):
+    """Linear-interpolated percentile of an already sorted sequence."""
+    n = len(sorted_vals)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return float(sorted_vals[0])
+    pos = (n - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, n - 1)
+    return float(sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (pos - lo))
+
+
+def duration_stats(durs, cpus=None):
+    """Distribution of per-call wall (and CPU) time, in ms."""
+    vals = sorted(durs)
+    n = len(vals)
+    if n == 0:
+        return {}
+    mean = sum(vals) / n
+    var = sum((v - mean) ** 2 for v in vals) / n if n > 1 else 0.0
+    out = {'avg_ms': mean, 'min_ms': vals[0], 'max_ms': vals[-1],
+           'p50_ms': percentile(vals, 0.50), 'p90_ms': percentile(vals, 0.90),
+           'p95_ms': percentile(vals, 0.95), 'p99_ms': percentile(vals, 0.99),
+           'stdev_ms': var ** 0.5, 'count': n}
+    if cpus:
+        out['cpu_avg_ms'] = sum(cpus) / len(cpus)
+    return out
+
+
 class PeakSampler(threading.Thread):
     """Polls memory while a DLL call runs, to catch its transient high-water mark.
 
@@ -208,8 +337,17 @@ def classify(slope, r2, net_growth, n):
 
 # --- Main -------------------------------------------------------------------
 
-def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mode):
-    """Return a zero-argument callable that performs exactly one DLL invocation."""
+def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mode,
+                 on_release=None, clock=None):
+    """Return a zero-argument callable that performs exactly one DLL invocation.
+
+    on_release(address) is told about every buffer this harness frees on the DLL's
+    behalf, so the allocation tracker can drop it before the allocator reuses it.
+    clock (a CycleClock) makes the callable record, in call.last, the wall and CPU
+    milliseconds of the foreign call alone - without the digest/copy/free work the
+    harness does around it: call.last == [dll_wall_ms, dll_cpu_ms]."""
+    last = [0.0, 0.0]
+    perf = time.perf_counter
     type_map = {'c_wchar_p': c_wchar_p, 'c_char_p': c_char_p, 'c_double': c_double}
     func = dll[func_name]
 
@@ -248,6 +386,8 @@ def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mod
         """Hand a DLL-allocated buffer (raw address) back to its allocator."""
         if not raw:
             return
+        if on_release is not None:
+            on_release(raw)
         if oleaut32 is not None:
             oleaut32.SysFreeString(raw)
         elif ole32 is not None:
@@ -257,11 +397,26 @@ def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mod
         """Hand the DLL-allocated out buffer back to its allocator, if asked."""
         release_raw(ctypes.cast(ptr_obj, ctypes.c_void_p).value)
 
+    def timed(*args):
+        """The foreign call itself, with its wall and CPU time left in `last`."""
+        if clock is not None:
+            c0 = clock.cycles()
+            t0 = perf()
+            r = func(*args)
+            t1 = perf()
+            last[1] = clock.to_ms(clock.cycles() - c0)
+            last[0] = (t1 - t0) * 1000.0
+        else:
+            t0 = perf()
+            r = func(*args)
+            last[0] = (perf() - t0) * 1000.0
+        return r
+
     def call():
         """Invoke once and return a short digest of the result, nothing retained."""
         if arg_type_str == 'c_wchar_p_ptr':
             out = c_wchar_p()
-            res = func(input_str, byref(out))
+            res = timed(input_str, byref(out))
             text = out.value or ''
             digest = hashlib.sha1(text.encode('utf-8', 'replace')).hexdigest()[:12]
             size = len(text)
@@ -269,9 +424,9 @@ def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mod
                 release(out)
             return digest, size, res
         if arg_type_str == 'c_char_p':
-            res = func(input_bytes)
+            res = timed(input_bytes)
         else:
-            res = func(input_str)
+            res = timed(input_str)
         if return_release:
             # res is the raw address of the DLL-allocated string (or None).
             if not res:
@@ -290,7 +445,89 @@ def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mod
         digest = hashlib.sha1(payload.encode('utf-8', 'replace')).hexdigest()[:12]
         return digest, len(payload), res
 
+    call.last = last
     return call
+
+
+VERDICT_RANK = {'insufficient': 0, 'clean': 1, 'suspect': 2, 'leak': 3}
+
+
+def decide_verdict(n, priv_fit, heap_fits):
+    """Combine the private-bytes fit with the heap fits into one verdict.
+
+    priv_fit / heap_fits entries are (slope, r2, net_growth). The heap is the
+    authority when it is readable: *live allocated* bytes and *non-heap* private
+    bytes (VirtualAlloc, mapped views) are the two places memory can really be held.
+    Growth in private bytes that neither of them explains is committed-but-free
+    memory the allocator has not returned: fragmentation, not a leak.
+
+    Returns (verdict, basis).
+    """
+    p_slope, p_r2, p_net = priv_fit
+    v_priv = classify(p_slope, p_r2, p_net, n)
+    if heap_fits is None:
+        return v_priv, 'private bytes'
+
+    v_live = classify(*heap_fits['live'], n)
+    v_non = classify(*heap_fits['nonheap'], n)
+    worst, basis = max(((v_live, 'live heap allocations'), (v_non, 'non-heap memory')),
+                       key=lambda t: VERDICT_RANK[t[0]])
+    if VERDICT_RANK[worst] >= VERDICT_RANK['suspect']:
+        return worst, basis
+    if v_live == 'insufficient':
+        return 'insufficient', basis
+    if VERDICT_RANK[v_priv] >= VERDICT_RANK['suspect']:
+        return 'suspect', 'committed memory only'
+    return 'clean', 'live heap allocations'
+
+
+def fit_triple(series, warmup):
+    seg = series[warmup:]
+    slope, r2 = linreg(seg, warmup)
+    net = int(seg[-1] - seg[0]) if len(seg) >= 2 else 0
+    return slope, r2, net
+
+
+def run_tracker_report(tracker, symbol_path, warmup, measured_count, top_sites, target_name):
+    """Ask the tracker for the surviving allocation sites and enrich them."""
+    tracker.set_symbol_path(symbol_path or '')
+    fd, path = tempfile.mkstemp(prefix='fnp_leaks_', suffix='.json')
+    os.close(fd)
+    try:
+        rc = tracker.report(path, warmup + 1, top_sites)
+        if rc != 0:
+            return {'error': f'Tracker report failed (code {rc})'}
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    tname = (data.get('target') or target_name or '').lower()
+    recurring_min = max(2, int(0.8 * measured_count))
+    for site in data.get('sites', []):
+        frames = site.get('frames', [])
+        origin = 0
+        for k, fr in enumerate(frames):
+            if (fr.get('module') or '').lower() == tname:
+                origin = k
+                break
+        # Keep the frames up to the outermost one inside the DLL: what lies beyond is
+        # the harness (ctypes / Python internals), which only buries the answer.
+        last_in_dll = max((k for k, fr in enumerate(frames)
+                           if (fr.get('module') or '').lower() == tname), default=None)
+        if last_in_dll is not None and last_in_dll + 1 < len(frames):
+            site['frames'] = frames[:last_in_dll + 2]    # plus the caller that entered the DLL
+            site['frames_trimmed'] = len(frames) - len(site['frames'])
+        site['origin'] = origin if frames else None
+        # A leak repeats on (almost) every call; a one-off after warmup is a lazy init
+        site['recurring'] = site.get('calls', 0) >= recurring_min
+        site['per_call_blocks'] = site['count'] / measured_count if measured_count else 0
+        site['per_call_bytes'] = site['bytes'] / measured_count if measured_count else 0
+    data['measured_calls'] = measured_count
+    return data
 
 
 def main():
@@ -318,14 +555,30 @@ def main():
     interval = max(0.001, float(req.get('sample_interval_ms', 5)) / 1000.0)
     free_mode = req.get('free_mode', 'none')
     unload = bool(req.get('unload_after', True))
+    track = bool(req.get('track_allocs', False))
+    symbol_path = req.get('symbol_path', '') or ''
+    top_sites = max(1, min(int(req.get('top_sites', 30)), 200))
 
     notes = []
     sampler = None
     dll = None
+    tracker = None
 
     try:
         with open(json_path, 'r', encoding='UTF-8') as f:
             input_str = json.dumps(json.load(f))
+
+        if track:
+            try:
+                from native_tools import Tracker
+                tracker = Tracker()
+            except Exception as e:
+                notes.append(f'Allocation tracking is unavailable ({type(e).__name__}: {e}). '
+                             'Run native\\build.bat to build bin\\fnp_tracker.dll.')
+                track = False
+
+        heap_meter = HeapMeter(exclude=[tracker.heap] if tracker else [])
+        clock = CycleClock()
 
         pre_load = mem_event()
         t_load = time.perf_counter()
@@ -333,11 +586,28 @@ def main():
         load_ms = (time.perf_counter() - t_load) * 1000.0
         footprint = module_footprint(dll._handle)
 
+        hooked = 0
+        if tracker is not None:
+            hooked = tracker.attach(dll._handle)
+            if hooked < 0:
+                notes.append('The allocation tracker could not patch this DLL (it must be a 64-bit '
+                             f'image; code {hooked}). No call stacks will be reported.')
+            elif hooked == 0:
+                notes.append('No allocation imports were found to hook. The DLL probably links the '
+                             'CRT statically (/MT) or allocates only through delay-loaded imports, '
+                             'so allocation call stacks are unavailable for it.')
+
         call = build_caller(dll, func_name, arg_type_str, res_type_str,
-                            input_str, free_mode)
+                            input_str, free_mode,
+                            on_release=tracker.untrack if tracker is not None else None,
+                            clock=clock if clock.available else None)
 
         gc.collect()
         baseline = mem_event()
+        base_heap = None
+        if heap_meter.available:
+            ha, hc = heap_meter.read()
+            base_heap = {'alloc': ha, 'commit': hc}
 
         emit({'event': 'start',
               'iterations': iterations,
@@ -346,15 +616,25 @@ def main():
               'load_ms': round(load_ms, 3),
               'pre_load': pre_load,
               'baseline': baseline,
+              'baseline_heap': base_heap,
               'module': footprint,
-              'free_mode': free_mode})
+              'free_mode': free_mode,
+              'tracking': {'requested': bool(req.get('track_allocs', False)),
+                           'active': tracker is not None and hooked > 0,
+                           'hooked': hooked},
+              'symbols': req.get('symbols'),
+              'cpu_clock': clock.available})
 
         # Fixed-width buffers: the harness must stay allocation-flat per iteration
         # or its own growth would be indistinguishable from the DLL's.
         priv = array.array('q', bytes(8 * iterations))
         rss = array.array('q', bytes(8 * iterations))
         peaks = array.array('q', bytes(8 * iterations))
-        durations = array.array('d', bytes(8 * iterations))
+        h_alloc = array.array('q', bytes(8 * iterations))
+        h_commit = array.array('q', bytes(8 * iterations))
+        durations = array.array('d', bytes(8 * iterations))    # foreign call only
+        totals = array.array('d', bytes(8 * iterations))       # call + harness work
+        cpus = array.array('d', bytes(8 * iterations))
 
         hashes = {}
         out_size = 0
@@ -368,10 +648,12 @@ def main():
         for i in range(iterations):
             sampler.peak_private = 0
             sampler.peak_rss = 0
+            if tracker is not None:
+                tracker.begin_call(i + 1)
             sampler.arm()
             t0 = time.perf_counter()
             digest, size, _ = call()
-            elapsed = (time.perf_counter() - t0) * 1000.0
+            total = (time.perf_counter() - t0) * 1000.0
             imm_private, imm_rss = mem()
             sampler.disarm()
 
@@ -379,11 +661,20 @@ def main():
             call_peak_rss = max(sampler.peak_rss, imm_rss)
             gc.collect()
             held_private, held_rss = mem()
+            if heap_meter.available:
+                held_alloc, held_commit = heap_meter.read()
+            else:
+                held_alloc = held_commit = 0
 
+            elapsed, cpu_ms = call.last
             priv[i] = held_private
             rss[i] = held_rss
             peaks[i] = call_peak
+            h_alloc[i] = held_alloc
+            h_commit[i] = held_commit
             durations[i] = elapsed
+            totals[i] = total
+            cpus[i] = cpu_ms
             out_size = size
             peak_private = max(peak_private, call_peak)
             peak_rss = max(peak_rss, call_peak_rss)
@@ -398,9 +689,12 @@ def main():
                   'warmup': i < warmup,
                   'private': held_private,
                   'rss': held_rss,
+                  'heap_alloc': held_alloc,
+                  'heap_commit': held_commit,
                   'peak': call_peak,
                   'transient': max(0, call_peak - held_private),
                   'ms': round(elapsed, 3),
+                  'cpu_ms': round(cpu_ms, 3),
                   'out_bytes': size,
                   'hash': digest})
 
@@ -408,6 +702,57 @@ def main():
         sampler = None
 
         final = {'private': priv[iterations - 1], 'rss': rss[iterations - 1]}
+        final_heap = ({'alloc': h_alloc[iterations - 1], 'commit': h_commit[iterations - 1]}
+                      if heap_meter.available else None)
+
+        # Regression runs on the post-warmup segment only: lazy singletons, caches
+        # and heap-arena warmup make the opening calls grow for legitimate reasons.
+        measured = priv[warmup:]
+        slope, r2 = linreg(measured, warmup)
+        net_growth = int(measured[-1] - measured[0]) if len(measured) >= 2 else 0
+
+        heap_fits = None
+        heap_summary = None
+        if heap_meter.available:
+            nonheap = array.array('q', (priv[k] - h_commit[k] for k in range(iterations)))
+            heap_fits = {
+                'live': fit_triple(h_alloc, warmup),
+                'commit': fit_triple(h_commit, warmup),
+                'nonheap': fit_triple(nonheap, warmup),
+            }
+            heap_summary = {
+                'baseline': base_heap,
+                'final': final_heap,
+                'slope_alloc': heap_fits['live'][0], 'r2_alloc': heap_fits['live'][1],
+                'net_alloc': heap_fits['live'][2],
+                'slope_commit': heap_fits['commit'][0], 'r2_commit': heap_fits['commit'][1],
+                'net_commit': heap_fits['commit'][2],
+                'slope_nonheap': heap_fits['nonheap'][0], 'r2_nonheap': heap_fits['nonheap'][1],
+                'net_nonheap': heap_fits['nonheap'][2],
+                'verdict_live': classify(*heap_fits['live'], len(measured)),
+                'verdict_nonheap': classify(*heap_fits['nonheap'], len(measured)),
+                'verdict_private': classify(slope, r2, net_growth, len(measured)),
+            }
+        verdict, basis = decide_verdict(len(measured), (slope, r2, net_growth), heap_fits)
+
+        # Surviving allocation sites, collected while the DLL is still loaded so the
+        # PDB can be matched against its image.
+        leaks = None
+        if tracker is not None and hooked > 0:
+            leaks = run_tracker_report(tracker, symbol_path, warmup, len(measured), top_sites,
+                                       os.path.basename(dll_path))
+            if 'error' not in leaks:
+                leaks['stats'] = tracker.stats()
+                recurring = [s for s in leaks.get('sites', []) if s.get('recurring')]
+                if verdict == 'clean' and recurring:
+                    # Heap-level thresholds can hide a small steady leak; the stacks cannot.
+                    verdict, basis = 'suspect', 'allocation tracker'
+                    notes.append('Memory looks flat overall, but the allocation tracker found '
+                                 f'{len(recurring)} call site(s) that keep a block alive on almost '
+                                 'every call. See "Leak sites" below.')
+                if leaks.get('symbols', {}).get('sym_type', -1) not in (1, 2, 3, 6, 7) and leaks.get('sites'):
+                    notes.append('Function names were not resolved from a PDB. Check the Symbols '
+                                 'status in Configuration - frames show module+offset until it matches.')
 
         after_unload = None
         if unload:
@@ -419,15 +764,15 @@ def main():
             time.sleep(0.05)
             after_unload = mem_event()
 
-        # Regression runs on the post-warmup segment only: lazy singletons, caches
-        # and heap-arena warmup make the opening calls grow for legitimate reasons.
-        measured = priv[warmup:]
-        slope, r2 = linreg(measured, warmup)
-        net_growth = int(measured[-1] - measured[0]) if len(measured) >= 2 else 0
-        verdict = classify(slope, r2, net_growth, len(measured))
-
         transients = [max(0, peaks[i] - priv[i]) for i in range(iterations)]
-        durs = durations[warmup:] or durations
+        durs = list(durations[warmup:]) or list(durations)
+        cpu_durs = list(cpus[warmup:]) or list(cpus)
+        tot_durs = list(totals[warmup:]) or list(totals)
+        dstats = duration_stats(durs, cpu_durs if clock.available else None)
+        dstats['total_ms'] = sum(durations)
+        dstats['first_ms'] = durations[0]
+        dstats['harness_avg_ms'] = (sum(tot_durs) - sum(durs)) / len(durs)
+        dstats['cpu_available'] = clock.available
 
         if arg_type_str == 'c_wchar_p_ptr' and free_mode == 'none':
             notes.append(
@@ -451,10 +796,21 @@ def main():
             notes.append(
                 f'Only {len(measured)} measured iterations after warmup - too few '
                 'for a reliable slope. Raise the iteration count.')
-        if verdict == 'clean' and slope > NOISE_FLOOR_BPI:
+        if verdict == 'clean' and slope > NOISE_FLOOR_BPI and heap_fits is None:
             notes.append(
                 'Total growth is small enough to be inconclusive rather than '
                 'proven clean. Raise the iteration count to confirm.')
+        if basis == 'committed memory only':
+            notes.append(
+                'Private bytes keep growing but live heap allocations do not: the heap is '
+                'holding freed pages committed (fragmentation or allocator caching). This is '
+                'usually not a leak; raise the iteration count to see whether it plateaus.')
+        if heap_summary is None:
+            notes.append('HeapSummary was not readable, so the verdict uses private bytes only.')
+        if tracker is not None:
+            notes.append('Allocation tracking is on: it slows every allocation and keeps '
+                         'bookkeeping per live block, so durations from this run are not '
+                         'representative. Use the Speed Profiler for timing.')
         if len(hashes) > 1:
             notes.append(
                 f'{len(hashes)} distinct output digests across {iterations} runs - '
@@ -483,12 +839,8 @@ def main():
                   'projection_10k': int(slope * 10000),
                   'transient_avg': int(sum(transients) / len(transients)) if transients else 0,
                   'transient_max': max(transients) if transients else 0,
-                  'duration': {
-                      'avg_ms': sum(durs) / len(durs),
-                      'min_ms': min(durs),
-                      'max_ms': max(durs),
-                      'total_ms': sum(durations),
-                  },
+                  'heap': heap_summary,
+                  'duration': dstats,
                   'output': {
                       'distinct': len(hashes),
                       'distinct_capped': len(hashes) >= 64,
@@ -496,6 +848,8 @@ def main():
                       'bytes': out_size,
                   },
                   'verdict': verdict,
+                  'verdict_basis': basis,
+                  'leaks': leaks,
                   'thresholds': {
                       'noise_floor_bpi': NOISE_FLOOR_BPI,
                       'strong_slope_bpi': STRONG_SLOPE_BPI,

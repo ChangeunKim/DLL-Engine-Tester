@@ -6,6 +6,9 @@ import subprocess
 import threading
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 
+import native_tools
+import symbols as pdb_symbols
+
 app = Flask(__name__)
 # Force Flask NOT to sort JSON keys alphabetically (preserves C++ original insertion order)
 app.config['JSON_SORT_KEYS'] = False
@@ -33,6 +36,8 @@ def native_browse():
         filetypes_code = "(('DLL files', '*.dll'), ('All files', '*.*'))"
     elif ext == '.json':
         filetypes_code = "(('JSON files', '*.json'), ('All files', '*.*'))"
+    elif ext == '.pdb':
+        filetypes_code = "(('PDB symbol files', '*.pdb'), ('All files', '*.*'))"
         
     cmd = f"""import tkinter as tk, tkinter.filedialog as fd
 root = tk.Tk()
@@ -310,57 +315,23 @@ def ndjson_error(message):
     return Response(json.dumps({"event": "error", "message": message}) + "\n",
                     mimetype='application/x-ndjson')
 
-@app.route('/api/profile', methods=['POST'])
-def profile():
-    """Run the DLL N times on one input and stream memory samples as NDJSON.
+def resolve_symbols(data):
+    """Validate the DLL/PDB pair once, up front, for whichever profiler is starting."""
+    check = pdb_symbols.check_symbols(data.get('dll_path') or '', data.get('pdb_path') or '')
+    return check, check.get('symbol_path', '')
 
-    The response is streamed rather than returned whole because a run of a few
-    thousand iterations can take minutes, and the UI charts each sample as it
-    lands. runner_profile.py keeps its own stdout clean of DLL output, so every
-    line here is expected to be a JSON event.
+
+def stream_runner(runner_file, payload):
+    """Start a profile runner subprocess and stream its NDJSON events to the browser.
+
+    Only one profile run exists at a time (memory and speed share the slot): two runs
+    would sample each other's noise.
     """
     global profile_process
 
-    data = request.json or {}
-    dll_path = data.get('dll_path')
-    json_path = data.get('json_path')
-    func_name = data.get('function_name')
-
-    if not dll_path or not os.path.exists(dll_path):
-        return ndjson_error("DLL file not found")
-    if not json_path or not os.path.exists(json_path):
-        return ndjson_error("Input JSON file not found")
-    if not func_name:
-        return ndjson_error("Function name is required")
-
-    try:
-        iterations = int(data.get('iterations', 20))
-        warmup = int(data.get('warmup', 3))
-    except (TypeError, ValueError):
-        return ndjson_error("Iterations and warmup must be whole numbers")
-
-    if iterations < 1 or iterations > 10000:
-        return ndjson_error("Iterations must be between 1 and 10000")
-    if warmup < 0 or warmup >= iterations:
-        return ndjson_error("Warmup must be at least 0 and less than the iteration count")
-
-    payload = {
-        "dll_path": dll_path,
-        "json_path": json_path,
-        "function_name": func_name,
-        "arg_type": data.get('arg_type', 'c_wchar_p'),
-        "res_type": data.get('res_type', 'c_wchar_p'),
-        "iterations": iterations,
-        "warmup": warmup,
-        "free_mode": data.get('free_mode', 'none'),
-        "unload_after": bool(data.get('unload_after', True)),
-        "sample_interval_ms": data.get('sample_interval_ms', 5),
-    }
-
-    # Only one profile run at a time: two runs would sample each other's noise.
     stop_profile_process()
 
-    runner_path = os.path.join(os.path.dirname(__file__), 'runner_profile.py')
+    runner_path = os.path.join(os.path.dirname(__file__), runner_file)
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", runner_path],
@@ -417,6 +388,136 @@ def profile():
             "X-Accel-Buffering": "no",
         }
     )
+
+
+def common_profile_args(data):
+    """Validate the fields both profilers share. Returns (error, dll, json, func)."""
+    dll_path = data.get('dll_path')
+    json_path = data.get('json_path')
+    func_name = data.get('function_name')
+    if not dll_path or not os.path.exists(dll_path):
+        return "DLL file not found", None, None, None
+    if not json_path or not os.path.exists(json_path):
+        return "Input JSON file not found", None, None, None
+    if not func_name:
+        return "Function name is required", None, None, None
+    machine = native_tools.pe_machine(dll_path)
+    if machine and machine != 'x64' and sys.maxsize > 2 ** 32:
+        return (f"This DLL is {machine} but the tester runs 64-bit Python; it cannot be loaded. "
+                "Build the DLL for x64."), None, None, None
+    return None, dll_path, json_path, func_name
+
+
+@app.route('/api/native_status')
+def native_status():
+    """Which native helpers (allocation tracker, sampler) are built."""
+    return jsonify(native_tools.native_status())
+
+
+@app.route('/api/symbol_check')
+def symbol_check():
+    """Does a PDB exist for this DLL, and is it the one the DLL was linked with?"""
+    dll_path = request.args.get('dll', '')
+    pdb_path = request.args.get('pdb', '')
+    res = pdb_symbols.check_symbols(dll_path, pdb_path)
+    res['machine'] = native_tools.pe_machine(dll_path) if dll_path and os.path.isfile(dll_path) else None
+    return jsonify(res)
+
+
+@app.route('/api/profile', methods=['POST'])
+def profile():
+    """Run the DLL N times on one input and stream memory samples as NDJSON.
+
+    The response is streamed rather than returned whole because a run of a few
+    thousand iterations can take minutes, and the UI charts each sample as it
+    lands. runner_profile.py keeps its own stdout clean of DLL output, so every
+    line here is expected to be a JSON event.
+    """
+    data = request.json or {}
+    err, dll_path, json_path, func_name = common_profile_args(data)
+    if err:
+        return ndjson_error(err)
+
+    try:
+        iterations = int(data.get('iterations', 20))
+        warmup = int(data.get('warmup', 3))
+    except (TypeError, ValueError):
+        return ndjson_error("Iterations and warmup must be whole numbers")
+
+    if iterations < 1 or iterations > 10000:
+        return ndjson_error("Iterations must be between 1 and 10000")
+    if warmup < 0 or warmup >= iterations:
+        return ndjson_error("Warmup must be at least 0 and less than the iteration count")
+
+    track = bool(data.get('track_allocs', False))
+    if track and not native_tools.native_status()['tracker']:
+        return ndjson_error("Allocation tracking needs bin\\fnp_tracker.dll. "
+                            + native_tools.BUILD_HINT)
+    check, symbol_path = resolve_symbols(data)
+
+    payload = {
+        "dll_path": dll_path,
+        "json_path": json_path,
+        "function_name": func_name,
+        "arg_type": data.get('arg_type', 'c_wchar_p'),
+        "res_type": data.get('res_type', 'c_wchar_p'),
+        "iterations": iterations,
+        "warmup": warmup,
+        "free_mode": data.get('free_mode', 'none'),
+        "unload_after": bool(data.get('unload_after', True)),
+        "sample_interval_ms": data.get('sample_interval_ms', 5),
+        "track_allocs": track,
+        "top_sites": data.get('top_sites', 30),
+        "symbol_path": symbol_path,
+        "symbols": check,
+    }
+    return stream_runner('runner_profile.py', payload)
+
+
+@app.route('/api/speed_profile', methods=['POST'])
+def speed_profile():
+    """Time the DLL (clean phase) and sample where the time goes (second phase)."""
+    data = request.json or {}
+    err, dll_path, json_path, func_name = common_profile_args(data)
+    if err:
+        return ndjson_error(err)
+
+    try:
+        iterations = int(data.get('iterations', 30))
+        warmup = int(data.get('warmup', 3))
+        sample_calls = int(data.get('sample_calls', iterations))
+        interval_us = int(data.get('interval_us', 1000))
+    except (TypeError, ValueError):
+        return ndjson_error("Iterations, warmup, sampled calls and interval must be whole numbers")
+
+    if iterations < 1 or iterations > 10000:
+        return ndjson_error("Iterations must be between 1 and 10000")
+    if warmup < 0 or warmup >= iterations:
+        return ndjson_error("Warmup must be at least 0 and less than the iteration count")
+    if sample_calls < 1 or sample_calls > 10000:
+        return ndjson_error("Sampled calls must be between 1 and 10000")
+    if interval_us < 200 or interval_us > 100000:
+        return ndjson_error("Sampling interval must be between 0.2 ms and 100 ms")
+
+    sample = bool(data.get('sample', True))
+    check, symbol_path = resolve_symbols(data)
+
+    payload = {
+        "dll_path": dll_path,
+        "json_path": json_path,
+        "function_name": func_name,
+        "arg_type": data.get('arg_type', 'c_wchar_p'),
+        "res_type": data.get('res_type', 'c_wchar_p'),
+        "iterations": iterations,
+        "warmup": warmup,
+        "free_mode": data.get('free_mode', 'none'),
+        "sample": sample,
+        "sample_calls": sample_calls,
+        "interval_us": interval_us,
+        "symbol_path": symbol_path,
+        "symbols": check,
+    }
+    return stream_runner('runner_speed.py', payload)
 
 @app.route('/api/profile_cancel', methods=['POST'])
 def profile_cancel():
