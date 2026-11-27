@@ -19,6 +19,8 @@
         private: '#3987e5',
         rss: '#d95926',
         transient: '#199e70',
+        live: '#a78bfa',       // live heap allocations
+        commit: '#7c879c',     // heap committed (a quieter companion series)
         retained: '#e66767',   // diverging: positive delta
         released: '#3987e5',   // diverging: negative delta
         grid: '#232735',
@@ -74,6 +76,12 @@
     var charts = [];        // registered chart instances, for synced hover
 
     function $(id) { return document.getElementById(id); }
+
+    /* HeapSummary may be unreadable (the start event then carries no heap baseline);
+       every heap-derived view hides itself in that case instead of drawing zeros. */
+    function hasHeap() {
+        return !!(state.start && state.start.baseline_heap);
+    }
 
     // --- Formatting ---------------------------------------------------------
 
@@ -563,6 +571,81 @@
         ]);
     }
 
+    // --- Chart 0: live heap allocations vs committed heap -------------------------
+
+    function renderHeapChart() {
+        var card = $('prof-heap-card');
+        var host = $('prof-chart-heap');
+        var n = state.samples.length;
+        if (!card || !host) return;
+        if (!hasHeap()) { card.hidden = true; return; }
+        card.hidden = false;
+        if (!n) return;
+
+        var idx = strideIdx(n, MAX_LINE_PTS);
+        var lo = Infinity, hi = -Infinity;
+        state.samples.forEach(function (s) {
+            lo = Math.min(lo, s.live, s.commit);
+            hi = Math.max(hi, s.live, s.commit);
+        });
+        var pad = (hi - lo) * 0.12 || Math.max(1024, hi * 0.0005);
+        var scale = byteScale(lo - pad, hi + pad, 4);
+        var frame = makeFrame(host, n, scale);
+
+        var fit = null;
+        if (n - state.warmup >= 2) {
+            fit = linreg(state.samples.slice(state.warmup).map(function (s) { return s.live; }),
+                state.warmup);
+            svgAppendTrend(frame, fit, state.warmup, n - 1);
+        }
+
+        [{ key: 'commit', color: VIZ.commit, w: 1.5 }, { key: 'live', color: VIZ.live, w: 2 }].forEach(function (ser) {
+            var d = '';
+            idx.forEach(function (i, k) {
+                d += (k ? 'L' : 'M') + frame.xAt(i).toFixed(1) + ' ' + frame.yAt(state.samples[i][ser.key]).toFixed(1);
+            });
+            frame.svg.appendChild(el('path', {
+                d: d, fill: 'none', stroke: ser.color, 'stroke-width': ser.w,
+                'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+            }));
+            frame.svg.appendChild(el('circle', {
+                cx: frame.xAt(n - 1), cy: frame.yAt(state.samples[n - 1][ser.key]), r: 4,
+                fill: ser.color, stroke: VIZ.surface, 'stroke-width': 2
+            }));
+        });
+
+        var maxI = 0;
+        for (var i = 1; i < n; i++) {
+            if (state.samples[i].live >= state.samples[maxI].live) maxI = i;
+        }
+        placeExtremeLabel(frame, maxI, state.samples[maxI].live);
+
+        var m = mountChart('prof-chart-heap', 'prof-tip-heap', frame);
+        var chart = { id: 'heap' };
+        var base = state.start.baseline_heap.alloc;
+        attachHover(chart, frame, m.host, m.tip, function (i) {
+            var s = state.samples[i];
+            var prev = i > 0 ? state.samples[i - 1].live : base;
+            return {
+                head: 'Call ' + (i + 1) + (i < state.warmup ? ' (warmup)' : '') + ' of ' + state.planned,
+                items: [
+                    { name: 'Live heap', color: VIZ.live, value: fmtBytes(s.live) },
+                    { name: 'Committed heap', color: VIZ.commit, value: fmtBytes(s.commit) },
+                    { name: 'Committed but free', color: 'transparent', value: fmtBytes(Math.max(0, s.commit - s.live)) },
+                    { name: 'Live change', color: 'transparent', value: fmtBytes(s.live - prev, true) }
+                ]
+            };
+        });
+        charts.push(chart);
+
+        var latest = state.samples[n - 1];
+        renderLegend('prof-legend-heap', [
+            { name: 'Live heap', color: VIZ.live, value: fmtBytes(latest.live) },
+            { name: 'Committed', color: VIZ.commit, value: fmtBytes(latest.commit) },
+            fit ? { name: 'Trend', color: null, dashed: true, value: fmtBytes(fit.slope, true) + '/call' } : null
+        ]);
+    }
+
     function svgAppendTrend(frame, fit, a, b) {
         var y1 = fit.slope * a + fit.intercept;
         var y2 = fit.slope * b + fit.intercept;
@@ -802,22 +885,36 @@
     function renderHero() {
         var n = state.samples.length;
         if (!n) return;
-        var slope = 0, r2 = null, measured = 0;
+        var heap = hasHeap();
+        var key = heap ? 'live' : 'private';
+        var slope = 0, r2 = null, measured = 0, privSlope = null;
         if (state.summary) {
-            slope = state.summary.slope_bytes_per_iter;
-            r2 = state.summary.r2;
+            if (heap && state.summary.heap) {
+                slope = state.summary.heap.slope_alloc;
+                r2 = state.summary.heap.r2_alloc;
+                privSlope = state.summary.slope_bytes_per_iter;
+            } else {
+                slope = state.summary.slope_bytes_per_iter;
+                r2 = state.summary.r2;
+            }
             measured = state.summary.measured_count;
         } else if (n - state.warmup >= 2) {
-            var fit = linreg(state.samples.slice(state.warmup).map(function (s) { return s.private; }), state.warmup);
+            var fit = linreg(state.samples.slice(state.warmup).map(function (s) { return s[key]; }), state.warmup);
             slope = fit.slope;
             r2 = fit.r2;
             measured = n - state.warmup;
+        }
+        var label = document.querySelector('#prof-body .profile-hero-label');
+        if (label) {
+            label.textContent = heap ? 'Live heap retained per call, after warmup'
+                                     : 'Memory retained per call, after warmup';
         }
         $('prof-hero-value').textContent = fmtBytes(slope, true);
         $('prof-hero-unit').textContent = 'per call';
         $('prof-hero-sub').textContent =
             'linear fit R² ' + fmtR2(r2) + ' over ' + measured + ' measured calls' +
-            '  ·  projected ' + fmtBytes(slope * 10000, true) + ' per 10,000 calls';
+            '  ·  projected ' + fmtBytes(slope * 10000, true) + ' per 10,000 calls' +
+            (privSlope !== null ? '  ·  private bytes ' + fmtBytes(privSlope, true) + ' per call' : '');
     }
 
     function tile(label, value, sub) {
@@ -859,6 +956,12 @@
             'on top of a ' + fmtBytes(base) + ' baseline'));
         host.appendChild(tile('Growth after warmup', fmtBytes(netGrowth, true),
             'calls ' + (state.warmup + 1) + '–' + n));
+        if (hasHeap()) {
+            var liveNet = sum && sum.heap ? sum.heap.net_alloc
+                : (n > state.warmup ? latest.live - state.samples[state.warmup].live : 0);
+            host.appendChild(tile('Live heap growth', fmtBytes(liveNet, true),
+                'allocated, not freed · calls ' + (state.warmup + 1) + '–' + n));
+        }
         host.appendChild(tile('First-call init', fmtBytes(firstCost),
             'one-time, not a leak'));
         host.appendChild(tile('Peak in-call memory', fmtBytes(peak),
@@ -870,7 +973,7 @@
             st.module ? 'mapped at ' + st.module.base : ''));
         host.appendChild(tile('Call duration',
             fmtMs(sum ? sum.duration.avg_ms : avgOf('ms')),
-            sum ? fmtMs(sum.duration.min_ms) + ' – ' + fmtMs(sum.duration.max_ms) : 'average'));
+            sum ? 'p95 ' + fmtMs(sum.duration.p95_ms) + ' · max ' + fmtMs(sum.duration.max_ms) : 'average'));
         host.appendChild(tile('Output stability',
             sum ? (sum.output.stable ? 'Identical' : sum.output.distinct + ' variants')
                 : (state.finished ? 'n/a' : '…'),
@@ -910,6 +1013,16 @@
         detailRow(host, 'DLL load time', st.load_ms !== undefined ? fmtMs(st.load_ms) : '--');
         detailRow(host, 'Private bytes before load', st.pre_load ? fmtBytes(st.pre_load.private) : '--');
         detailRow(host, 'Baseline after load', st.baseline ? fmtBytes(st.baseline.private) : '--');
+        if (st.baseline_heap) {
+            detailRow(host, 'Live heap at baseline', fmtBytes(st.baseline_heap.alloc));
+        }
+        if (st.tracking && st.tracking.requested) {
+            detailRow(host, 'Allocation tracking',
+                st.tracking.active ? st.tracking.hooked + ' imports hooked' : 'not active');
+        }
+        if (st.symbols && st.symbols.state) {
+            detailRow(host, 'Symbols', st.symbols.state + (st.symbols.pdb ? ' · ' + st.symbols.pdb : ''));
+        }
         if (sum) {
             detailRow(host, 'Private bytes at end', fmtBytes(sum.final.private));
             detailRow(host, 'Working set at end', fmtBytes(sum.final.rss));
@@ -917,8 +1030,16 @@
                 sum.after_unload ? fmtBytes(sum.after_unload.private) : 'not unloaded');
             detailRow(host, 'Reclaimed by unload',
                 sum.after_unload ? fmtBytes(sum.final.private - sum.after_unload.private) : '--');
-            detailRow(host, 'Trend slope', fmtBytes(sum.slope_bytes_per_iter, true) + ' / call');
-            detailRow(host, 'Fit quality (R²)', fmtR2(sum.r2));
+            if (sum.heap) {
+                detailRow(host, 'Live heap slope', fmtBytes(sum.heap.slope_alloc, true) + ' / call (R² ' + fmtR2(sum.heap.r2_alloc) + ')');
+                detailRow(host, 'Committed heap slope', fmtBytes(sum.heap.slope_commit, true) + ' / call');
+                detailRow(host, 'Non-heap memory slope', fmtBytes(sum.heap.slope_nonheap, true) + ' / call');
+            }
+            detailRow(host, 'Private bytes slope', fmtBytes(sum.slope_bytes_per_iter, true) + ' / call');
+            detailRow(host, 'Private bytes fit (R²)', fmtR2(sum.r2));
+            if (sum.duration && sum.duration.cpu_available) {
+                detailRow(host, 'CPU time per call', fmtMs(sum.duration.cpu_avg_ms));
+            }
             detailRow(host, 'Projected at 10k calls', fmtBytes(sum.projection_10k, true));
             detailRow(host, 'Total run time', fmtMs(sum.duration.total_ms));
             detailRow(host, 'Output buffer release', st.free_mode || 'none');
@@ -942,9 +1063,12 @@
         } else {
             $('prof-verdict-icon').textContent = v.icon;
             $('prof-verdict-title').textContent = v.title;
+            var vs = sum.heap ? sum.heap.slope_alloc : sum.slope_bytes_per_iter;
+            var vr = sum.heap ? sum.heap.r2_alloc : sum.r2;
             $('prof-verdict-detail').textContent = v.detail + ' Measured ' +
-                fmtBytes(sum.slope_bytes_per_iter, true) + ' per call across ' +
-                sum.measured_count + ' calls (R² ' + fmtR2(sum.r2) + ').';
+                fmtBytes(vs, true) + ' per call across ' +
+                sum.measured_count + ' calls (R² ' + fmtR2(vr) + ')' +
+                (sum.verdict_basis ? ', judged on ' + sum.verdict_basis : '') + '.';
         }
 
         var notes = $('prof-notes');
@@ -975,6 +1099,7 @@
             [
                 String(i + 1),
                 fmtInt(s.private),
+                hasHeap() ? fmtInt(s.live) : '--',
                 fmtBytes(s.delta, true),
                 fmtInt(s.rss),
                 fmtInt(s.peak),
@@ -984,7 +1109,7 @@
             ].forEach(function (val, col) {
                 var td = document.createElement('td');
                 td.textContent = val;
-                if (col === 2) td.className = s.delta > 0 ? 'cell-pos' : (s.delta < 0 ? 'cell-neg' : '');
+                if (col === 3) td.className = s.delta > 0 ? 'cell-pos' : (s.delta < 0 ? 'cell-neg' : '');
                 tr.appendChild(td);
             });
             body.appendChild(tr);
@@ -993,7 +1118,7 @@
         if (offset > 0) {
             var tr = document.createElement('tr');
             var td = document.createElement('td');
-            td.colSpan = 8;
+            td.colSpan = 9;
             td.style.textAlign = 'center';
             td.textContent = 'Showing the last ' + TABLE_ROW_CAP + ' of ' + rows.length +
                 ' calls. Download the CSV for the full series.';
@@ -1014,10 +1139,10 @@
             alert('Run a memory profile first.');
             return;
         }
-        var lines = ['call,is_warmup,private_bytes,delta_bytes,working_set_bytes,in_call_peak_bytes,transient_bytes,duration_ms,output_digest'];
+        var lines = ['call,is_warmup,private_bytes,live_heap_bytes,committed_heap_bytes,delta_bytes,working_set_bytes,in_call_peak_bytes,transient_bytes,duration_ms,cpu_ms,output_digest'];
         state.samples.forEach(function (s, i) {
-            lines.push([i + 1, i < state.warmup ? 1 : 0, s.private, s.delta, s.rss,
-                s.peak, s.transient, s.ms, s.hash].join(','));
+            lines.push([i + 1, i < state.warmup ? 1 : 0, s.private, s.live, s.commit, s.delta, s.rss,
+                s.peak, s.transient, s.ms, s.cpu, s.hash].join(','));
         });
         var name = (document.getElementById('func-name').value || 'dll') + '_memory_profile.csv';
         var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -1033,6 +1158,121 @@
         }, 0);
     };
 
+    // --- Leak sites ------------------------------------------------------------
+
+    function baseName(path) {
+        var i = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'));
+        return i >= 0 ? path.slice(i + 1) : path;
+    }
+
+    function frameLocation(fr) {
+        if (!fr.file) return fr.module || '';
+        return baseName(fr.file) + (fr.line ? ':' + fr.line : '');
+    }
+
+    function span(cls, txt) {
+        var n = document.createElement('span');
+        if (cls) n.className = cls;
+        n.textContent = txt;
+        return n;
+    }
+
+    function renderLeaks() {
+        var card = $('prof-leaks-card');
+        if (!card) return;
+        var lk = state.summary && state.summary.leaks;
+        if (!lk) { card.hidden = true; return; }
+        card.hidden = false;
+        var body = $('prof-leaks-body');
+        body.textContent = '';
+
+        if (lk.error) {
+            body.appendChild(span('leak-empty', lk.error));
+            renderLegend('prof-leaks-summary', []);
+            return;
+        }
+
+        var sites = lk.sites || [];
+        var recurring = sites.filter(function (x) { return x.recurring; });
+        var retained = recurring.reduce(function (a, x) { return a + x.bytes; }, 0);
+        renderLegend('prof-leaks-summary', [
+            { name: 'Leaking sites', color: null, value: String(recurring.length) },
+            { name: 'Retained by them', color: null, value: fmtBytes(retained) },
+            { name: 'Live at end', color: null, value: fmtInt(lk.live_blocks) + ' blocks · ' + fmtBytes(lk.live_bytes) }
+        ]);
+
+        if (!sites.length) {
+            body.appendChild(span('leak-empty',
+                'No allocation made after warmup is still alive. The DLL freed everything it ' +
+                'allocated during the measured calls.'));
+            return;
+        }
+
+        sites.forEach(function (site) {
+            var frames = site.frames || [];
+            var origin = frames[site.origin || 0] || {};
+            var box = document.createElement('div');
+            box.className = 'leak-site' + (site.recurring ? ' is-leak' : '');
+
+            var head = document.createElement('div');
+            head.className = 'leak-head';
+            head.appendChild(span('pill ' + (site.recurring ? 'pill-leak' : 'pill-info'),
+                site.recurring ? 'Leaks every call' : 'One-time'));
+            var fn = span('leak-func', origin.func || '(unknown)');
+            fn.title = origin.func || '';
+            head.appendChild(fn);
+            var loc = frameLocation(origin);
+            if (loc) {
+                var l = span('leak-loc', loc);
+                l.title = origin.file || '';
+                head.appendChild(l);
+            }
+            var meta = document.createElement('div');
+            meta.className = 'leak-meta';
+            meta.appendChild(span('leak-bytes', fmtBytes(site.bytes)));
+            meta.appendChild(span('', fmtInt(site.count) + (site.count === 1 ? ' block' : ' blocks')));
+            meta.appendChild(span('', 'from ' + site.calls + ' of ' + lk.measured_calls + ' calls'));
+            if (site.recurring) {
+                meta.appendChild(span('', '≈ ' + fmtBytes(site.per_call_bytes) + ' per call'));
+            }
+            head.appendChild(meta);
+            box.appendChild(head);
+
+            if (frames.length) {
+                var det = document.createElement('details');
+                det.className = 'leak-stack';
+                var sum = document.createElement('summary');
+                sum.textContent = 'Call stack (' + frames.length + ' frames)';
+                det.appendChild(sum);
+                var ol = document.createElement('ol');
+                frames.forEach(function (fr, k) {
+                    var li = document.createElement('li');
+                    if (k === site.origin) li.className = 'is-origin';
+                    li.appendChild(span('fr-func', fr.func));
+                    if (fr.inlined) li.appendChild(span('fr-tag', 'inlined'));
+                    var where = frameLocation(fr);
+                    if (where) {
+                        var w = span('fr-loc', where);
+                        w.title = fr.file || '';
+                        li.appendChild(w);
+                    }
+                    if (fr.file && fr.module) li.appendChild(span('fr-mod', fr.module));
+                    ol.appendChild(li);
+                });
+                det.appendChild(ol);
+                box.appendChild(det);
+            }
+            body.appendChild(box);
+        });
+
+        if (lk.baseline_live_blocks) {
+            body.appendChild(span('leak-foot',
+                'Not counted: ' + fmtInt(lk.baseline_live_blocks) + ' blocks (' +
+                fmtBytes(lk.baseline_live_bytes) + ') allocated before the measured calls ' +
+                '(load time and warmup) and still alive - typically caches and singletons.'));
+        }
+    }
+
     // --- Render orchestration ----------------------------------------------
 
     function renderAll() {
@@ -1041,9 +1281,11 @@
         renderVerdict();
         renderHero();
         renderStats();
+        renderHeapChart();
         renderHeldChart();
         renderDeltaChart();
         renderTransientChart();
+        renderLeaks();
         renderDetails();
         renderTable();
         if (state.hover !== null) setHover(state.hover);
@@ -1135,6 +1377,9 @@
             state.samples.push({
                 private: ev.private,
                 rss: ev.rss,
+                live: ev.heap_alloc || 0,
+                commit: ev.heap_commit || 0,
+                cpu: ev.cpu_ms || 0,
                 peak: ev.peak,
                 transient: ev.transient,
                 ms: ev.ms,
@@ -1204,6 +1449,7 @@
         charts.length = 0;
         $('prof-logs').hidden = true;
         $('prof-logs-body').textContent = '';
+        $('prof-leaks-card').hidden = true;
 
         $('prof-body').hidden = false;
         setRunning(true);
@@ -1224,7 +1470,9 @@
                 iterations: iterations,
                 warmup: warmup,
                 free_mode: $('prof-free-mode').value,
-                unload_after: true
+                unload_after: true,
+                track_allocs: $('prof-track').checked,
+                pdb_path: window.FnpSymbols ? window.FnpSymbols.path() : ''
             }),
             signal: state.controller.signal
         }).then(function (res) {
@@ -1353,6 +1601,7 @@
         localStorage.setItem('fnp_prof_iterations', $('prof-iterations').value);
         localStorage.setItem('fnp_prof_warmup', $('prof-warmup').value);
         localStorage.setItem('fnp_prof_free_mode', $('prof-free-mode').value);
+        localStorage.setItem('fnp_prof_track', $('prof-track').checked ? '1' : '0');
     }
 
     function loadProfileConfig() {
@@ -1362,13 +1611,21 @@
         if (wu !== null) $('prof-warmup').value = wu;
         var fm = localStorage.getItem('fnp_prof_free_mode');
         if (fm) $('prof-free-mode').value = fm;
+        $('prof-track').checked = localStorage.getItem('fnp_prof_track') === '1';
     }
+
+    // Small, stable surface for the speed profiler (static/speed.js) to reuse.
+    window.FnpViz = {
+        VIZ: VIZ, fmtBytes: fmtBytes, fmtInt: fmtInt, fmtMs: fmtMs, el: el, text: text,
+        niceStep: niceStep, renderLegend: renderLegend, tile: tile, detailRow: detailRow,
+        baseName: baseName, span: span
+    };
 
     // --- Boot ---------------------------------------------------------------
 
     window.addEventListener('load', function () {
         loadProfileConfig();
-        ['prof-iterations', 'prof-warmup', 'prof-free-mode'].forEach(function (id) {
+        ['prof-iterations', 'prof-warmup', 'prof-free-mode', 'prof-track'].forEach(function (id) {
             var node = $(id);
             if (node) node.addEventListener('change', saveProfileConfig);
         });

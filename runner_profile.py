@@ -488,6 +488,22 @@ def fit_triple(series, warmup):
     return slope, r2, net
 
 
+_PLUMBING_PREFIXES = ('operator new', 'operator delete', 'std::', 'malloc', 'free', 'calloc',
+                      'realloc', '_aligned', '_malloc', '_calloc', '_recalloc', '_strdup', '_wcsdup',
+                      'HeapAlloc', 'HeapFree', 'SysAllocString', 'CoTaskMemAlloc')
+_PLUMBING_PATHS = ('\\vctools\\', '\\vc\\tools\\msvc\\', '\\windows kits\\', '\\ucrt\\',
+                   '\\vcruntime\\', '\\vcstartup\\')
+
+
+def is_plumbing_frame(fr):
+    """True for allocator / C++ runtime / STL frames that are not the DLL's own logic."""
+    func = fr.get('func') or ''
+    if func.startswith(_PLUMBING_PREFIXES):
+        return True
+    path = (fr.get('file') or '').lower()
+    return any(p in path for p in _PLUMBING_PATHS)
+
+
 def run_tracker_report(tracker, symbol_path, warmup, measured_count, top_sites, target_name):
     """Ask the tracker for the surviving allocation sites and enrich them."""
     tracker.set_symbol_path(symbol_path or '')
@@ -509,11 +525,21 @@ def run_tracker_report(tracker, symbol_path, warmup, measured_count, top_sites, 
     recurring_min = max(2, int(0.8 * measured_count))
     for site in data.get('sites', []):
         frames = site.get('frames', [])
-        origin = 0
+        # The allocation site worth reading is the first DLL frame that is the DLL's own
+        # code: operator new, malloc wrappers and STL container internals sit above it
+        # in every stack and say nothing about who asked for the memory.
+        origin = None
+        first_in_dll = None
         for k, fr in enumerate(frames):
-            if (fr.get('module') or '').lower() == tname:
+            if (fr.get('module') or '').lower() != tname:
+                continue
+            if first_in_dll is None:
+                first_in_dll = k
+            if not is_plumbing_frame(fr):
                 origin = k
                 break
+        if origin is None:
+            origin = first_in_dll if first_in_dll is not None else 0
         # Keep the frames up to the outermost one inside the DLL: what lies beyond is
         # the harness (ctypes / Python internals), which only buries the answer.
         last_in_dll = max((k for k, fr in enumerate(frames)

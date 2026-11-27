@@ -1021,3 +1021,211 @@ body.has-fullscreen .container {
     .blob { animation: none; }
     .profile-progress-bar span { transition: none; }
 }
+
+/* ==========================================================================
+   Symbols field, leak sites, speed profiler
+   ========================================================================== */
+
+.field-hint {
+    margin-top: 6px;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+.field-hint:empty { display: none; }
+.field-hint.is-warn { color: #fab219; }
+
+/* Checkbox sitting in a .profile-controls row, bottom-aligned with the inputs */
+.profile-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 4px;
+    font-size: 0.88rem;
+    color: var(--viz-ink-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.profile-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-blue);
+    cursor: pointer;
+}
+.profile-controls input[type="number"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.speed-panel { margin-top: 0; }
+
+/* --- Leak sites ---------------------------------------------------------- */
+.leak-site {
+    border: 1px solid var(--border-glass);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.leak-site.is-leak {
+    border-color: rgba(208, 59, 59, 0.5);
+    background: rgba(208, 59, 59, 0.06);
+}
+.leak-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+}
+.leak-func {
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    font-weight: 500;
+    color: var(--viz-ink);
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+.leak-loc {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--viz-ink-muted);
+}
+.leak-meta {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 0.76rem;
+    color: var(--viz-ink-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.leak-bytes { font-weight: 600; color: var(--viz-ink); }
+.pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.pill-leak { background: rgba(208, 59, 59, 0.22); color: #f08a8a; }
+.pill-info { background: rgba(124, 135, 156, 0.22); color: #b9c0cf; }
+.leak-stack { margin-top: 8px; }
+.leak-stack summary {
+    cursor: pointer;
+    font-size: 0.76rem;
+    color: var(--viz-ink-muted);
+    user-select: none;
+}
+.leak-stack summary:hover { color: var(--viz-ink-secondary); }
+.leak-stack ol {
+    margin: 8px 0 0;
+    padding-left: 22px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.75;
+    color: var(--viz-ink-secondary);
+}
+.leak-stack li.is-origin { color: var(--viz-ink); font-weight: 600; }
+.leak-stack li.is-origin::marker { color: #f08a8a; }
+.fr-func { overflow-wrap: anywhere; }
+.fr-loc { margin-left: 10px; color: var(--viz-ink-muted); }
+.fr-mod { margin-left: 10px; color: #5f6a80; }
+.fr-tag {
+    margin-left: 8px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 0.68rem;
+    color: var(--viz-ink-muted);
+}
+.leak-empty, .leak-foot {
+    display: block;
+    padding: 12px 2px 4px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--viz-ink-muted);
+}
+
+/* --- Flame graph / module bar / hot table --------------------------------- */
+.flame-wrap {
+    width: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 560px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.015);
+}
+.flame-wrap svg { display: block; }
+.flame-detail {
+    min-height: 2.9em;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--viz-ink-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.flame-detail strong { color: var(--viz-ink); font-weight: 600; }
+
+.module-track {
+    display: flex;
+    width: 100%;
+    height: 30px;
+    border-radius: 6px;
+    overflow: hidden;
+    gap: 2px;
+}
+.module-seg {
+    height: 100%;
+    min-width: 2px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    box-sizing: border-box;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.module-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    margin-top: 12px;
+}
+
+.seg-btn { padding: 3px 10px; font-size: 0.74rem; opacity: 0.7; }
+.seg-btn.is-on { opacity: 1; border-color: var(--accent-blue); }
+
+.hot-table td { vertical-align: middle; }
+.hot-table td.hot-name { text-align: left; font-family: var(--font-mono); max-width: 440px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hot-table th:first-child { text-align: left; }
+.hot-table td.hot-loc { text-align: left; color: var(--viz-ink-muted); font-family: var(--font-mono); font-size: 0.74rem; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hot-table th:last-child { text-align: left; }
+.hot-share { white-space: nowrap; }
+.hot-share > span:last-child { display: inline-block; min-width: 3.6em; text-align: right; }
+.hot-meter {
+    display: inline-block;
+    width: 84px;
+    height: 6px;
+    margin-right: 10px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    vertical-align: middle;
+    overflow: hidden;
+}
+.hot-meter > span { display: block; height: 100%; border-radius: 3px; }
+.role-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 8px;
+    border-radius: 2px;
+    vertical-align: baseline;
+}

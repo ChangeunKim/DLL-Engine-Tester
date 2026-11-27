@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.7">
 </head>
 
 <body>
@@ -34,6 +34,20 @@
                         <button class="btn btn-secondary"
                             onclick="openFileBrowser('dll-path', '.dll', '')">Browse</button>
                     </div>
+                </div>
+
+                <!-- Symbols (PDB): used by the leak-site tracker and the speed profiler to name functions -->
+                <div class="form-group">
+                    <label for="pdb-path" title="Needed to turn addresses into function names, files and lines. Leave empty to look next to the DLL.">Symbols (PDB)
+                        <span class="status-badge" id="sym-status"
+                            style="display:none; padding:2px 8px; font-size:0.7rem; float:right;"></span></label>
+                    <div class="input-with-button">
+                        <input type="text" id="pdb-path"
+                            placeholder="Auto-detect next to the DLL, or pick a .pdb file / folder...">
+                        <button class="btn btn-secondary"
+                            onclick="openFileBrowser('pdb-path', '.pdb', FnpSymbols.dllDir())">Browse</button>
+                    </div>
+                    <div class="field-hint" id="sym-detail"></div>
                 </div>
 
                 <!-- Function Details -->
@@ -174,6 +188,11 @@
                             <option value="cotaskmem">CoTaskMemFree</option>
                         </select>
                     </div>
+                    <label class="profile-check"
+                        title="Hooks the DLL's allocation calls and reports, per call stack, the blocks that were never freed. Names the leaking function. Slows the run down.">
+                        <input type="checkbox" id="prof-track">
+                        <span>Track leak call stacks</span>
+                    </label>
                     <button class="btn btn-primary profile-run-btn" id="prof-run-btn" onclick="runMemoryProfile()">
                         <span class="btn-text">Run Memory Profile</span>
                         <span class="loader" id="prof-loader" style="display: none;"></span>
@@ -214,6 +233,22 @@
                     </div>
 
                     <div class="stat-grid" id="prof-stats"></div>
+
+                    <!-- Chart 0: live heap, the sharpest leak signal -->
+                    <div class="chart-card" id="prof-heap-card">
+                        <div class="chart-head">
+                            <div class="chart-title">Live heap allocations after each call</div>
+                            <div class="chart-legend" id="prof-legend-heap"></div>
+                        </div>
+                        <div class="chart-subtitle">
+                            Bytes the process heaps hold allocated right now, against bytes they merely
+                            keep committed. Live growth is a leak; committed-only growth is the allocator
+                            holding freed pages.
+                        </div>
+                        <div class="chart-plot" id="prof-chart-heap">
+                            <div class="chart-tooltip" id="prof-tip-heap"></div>
+                        </div>
+                    </div>
 
                     <!-- Chart 1: the leak signal -->
                     <div class="chart-card">
@@ -260,6 +295,20 @@
                         </div>
                     </div>
 
+                    <!-- Leak sites: which call stacks still own memory -->
+                    <div class="chart-card" id="prof-leaks-card" hidden>
+                        <div class="chart-head">
+                            <div class="chart-title">Leak sites</div>
+                            <div class="chart-legend" id="prof-leaks-summary"></div>
+                        </div>
+                        <div class="chart-subtitle">
+                            Allocations made by the DLL after warmup that were never freed, grouped by call
+                            stack. A site that keeps a block from nearly every call is a leak; a site seen
+                            in one call is a lazy initialisation.
+                        </div>
+                        <div id="prof-leaks-body"></div>
+                    </div>
+
                     <div class="profile-table-toggle">
                         <button class="btn btn-secondary" id="prof-table-btn" onclick="toggleProfileTable()">
                             Show per-call table</button>
@@ -271,6 +320,7 @@
                                 <tr>
                                     <th scope="col">Call</th>
                                     <th scope="col">Private bytes</th>
+                                    <th scope="col">Live heap</th>
                                     <th scope="col">Delta</th>
                                     <th scope="col">Working set</th>
                                     <th scope="col">In-call peak</th>
@@ -292,12 +342,167 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ============================================================
+                 Speed Profiler: how long a call takes, and where the time goes.
+                 Phase 1 times N calls on their own; phase 2 samples the call
+                 stack of M more calls to find the hot spots.
+                 ============================================================ -->
+            <div class="panel profile-panel speed-panel">
+                <div class="section-header">
+                    <div class="section-title">Speed Profiler</div>
+                    <span class="status-badge" id="spd-badge">Idle</span>
+                </div>
+
+                <div class="profile-controls">
+                    <div class="form-group profile-field-sm">
+                        <label for="spd-iterations" title="Timed calls (phase 1, nothing attached)">Iterations</label>
+                        <input type="number" id="spd-iterations" min="1" max="10000" step="1" value="30">
+                    </div>
+                    <div class="form-group profile-field-sm">
+                        <label for="spd-warmup" title="Leading calls excluded from the statistics">Warmup</label>
+                        <input type="number" id="spd-warmup" min="0" max="9999" step="1" value="3">
+                    </div>
+                    <label class="profile-check"
+                        title="Phase 2: sample the call stack of extra calls to see which functions the time is spent in.">
+                        <input type="checkbox" id="spd-sample" checked>
+                        <span>Find hot spots</span>
+                    </label>
+                    <div class="form-group profile-field-sm">
+                        <label for="spd-sample-calls" title="Calls made while the sampler is attached (phase 2)">Sampled calls</label>
+                        <input type="number" id="spd-sample-calls" min="1" max="10000" step="1" value="30">
+                    </div>
+                    <div class="form-group profile-field-sm">
+                        <label for="spd-interval" title="Time between stack samples, in milliseconds">Interval (ms)</label>
+                        <input type="number" id="spd-interval" min="0.2" max="100" step="0.1" value="1">
+                    </div>
+                    <button class="btn btn-primary profile-run-btn" id="spd-run-btn" onclick="runSpeedProfile()">
+                        <span class="btn-text">Run Speed Profile</span>
+                        <span class="loader" id="spd-loader" style="display: none;"></span>
+                    </button>
+                    <button class="btn btn-secondary" id="spd-cancel-btn" onclick="cancelSpeedProfile()"
+                        style="display: none;">Cancel</button>
+
+                    <div class="profile-progress">
+                        <span id="spd-progress-text">Not started</span>
+                        <div class="profile-progress-bar"><span id="spd-progress-fill"></span></div>
+                    </div>
+                </div>
+
+                <div class="profile-empty" id="spd-empty">
+                    Times the selected DLL function on its own, then samples its call stack while it runs
+                    to show which functions the time goes to.<br>
+                    Set the iteration counts and press <strong>Run Speed Profile</strong>.
+                </div>
+
+                <div id="spd-results" hidden>
+                    <div class="verdict-banner verdict-unknown" id="spd-banner">
+                        <div class="verdict-icon" id="spd-banner-icon" aria-hidden="true">?</div>
+                        <div class="verdict-body">
+                            <div class="verdict-title" id="spd-banner-title">Running</div>
+                            <div class="verdict-detail" id="spd-banner-detail">Collecting timings...</div>
+                            <ul class="verdict-notes" id="spd-notes"></ul>
+                        </div>
+                    </div>
+
+                    <div id="spd-body">
+                        <div class="profile-hero">
+                            <div class="profile-hero-label">Typical call time (median), after warmup</div>
+                            <div class="profile-hero-value" id="spd-hero-value">--</div>
+                            <div class="profile-hero-unit" id="spd-hero-unit">per call</div>
+                            <div class="profile-hero-sub" id="spd-hero-sub"></div>
+                        </div>
+
+                        <div class="stat-grid" id="spd-stats"></div>
+
+                        <div class="chart-card">
+                            <div class="chart-head">
+                                <div class="chart-title">Time per call</div>
+                                <div class="chart-legend" id="spd-legend-calls"></div>
+                            </div>
+                            <div class="chart-subtitle">
+                                Wall-clock time of the DLL call, with the CPU time it burned underneath.
+                                A gap between the two is time spent waiting (sleep, I/O, locks).
+                            </div>
+                            <div class="chart-plot" id="spd-chart-calls">
+                                <div class="chart-tooltip" id="spd-tip-calls"></div>
+                            </div>
+                        </div>
+
+                        <div class="chart-card" id="spd-hot-card" hidden>
+                            <div class="chart-head">
+                                <div class="chart-title">Where the time goes</div>
+                                <div class="chart-legend" id="spd-legend-flame"></div>
+                            </div>
+                            <div class="chart-subtitle" id="spd-flame-sub">
+                                Each bar is a function; its width is the share of the call spent in it
+                                (including what it calls). Click a bar to zoom in, click the top bar to reset.
+                            </div>
+                            <div class="flame-wrap" id="spd-flame"></div>
+                            <div class="flame-detail" id="spd-flame-detail">Hover a bar for details.</div>
+                        </div>
+
+                        <div class="chart-card" id="spd-modules-card" hidden>
+                            <div class="chart-head">
+                                <div class="chart-title">Time by module</div>
+                                <div class="chart-legend" id="spd-legend-modules"></div>
+                            </div>
+                            <div class="chart-subtitle">
+                                Where the CPU actually was when sampled: the DLL's own code, the C/C++
+                                runtime (allocation, math, string), or the OS (waits, locks).
+                            </div>
+                            <div class="module-bar" id="spd-module-bar"></div>
+                        </div>
+
+                        <div class="chart-card" id="spd-top-card" hidden>
+                            <div class="chart-head">
+                                <div class="chart-title">Hottest functions</div>
+                                <div class="chart-legend">
+                                    <button class="btn btn-secondary seg-btn is-on" id="spd-sort-self"
+                                        onclick="setSpeedSort('self')">By self time</button>
+                                    <button class="btn btn-secondary seg-btn" id="spd-sort-incl"
+                                        onclick="setSpeedSort('incl')">By inclusive time</button>
+                                </div>
+                            </div>
+                            <div class="chart-subtitle">
+                                Self time is spent in the function's own instructions; inclusive time also
+                                counts everything it calls. Times are estimates from the sample share.
+                            </div>
+                            <div class="profile-table-wrap">
+                                <table class="profile-table hot-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Function</th>
+                                            <th scope="col">Share</th>
+                                            <th scope="col">Per call</th>
+                                            <th scope="col">Location</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="spd-top-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="profile-table-toggle">
+                            <button class="btn btn-secondary" onclick="downloadSpeedCsv()">Download CSV</button>
+                        </div>
+                        <dl class="profile-detail-grid" id="spd-details"></dl>
+                    </div><!-- /spd-body -->
+
+                    <div class="profile-logs" id="spd-logs" hidden>
+                        <div class="stat-label">DLL stdout / stderr during the run</div>
+                        <pre id="spd-logs-body"></pre>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Cache-bussed JS Script -->
     <script src="{{ url_for('static', filename='script.js') }}?v=2.3"></script>
-    <script src="{{ url_for('static', filename='profiler.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='symbols.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='profiler.js') }}?v=2.0"></script>
+    <script src="{{ url_for('static', filename='speed.js') }}?v=1.0"></script>
 </body>
 
 </html>
