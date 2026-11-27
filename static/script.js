@@ -241,7 +241,9 @@ async function saveInputAs() {
     const content = inputView.value;
     
     try {
-        const response = await fetch('/api/browse_save_as');
+        // Same remembered folder as the JSON Browse button
+        const startDir = browseStartDir('json-path', '');
+        const response = await fetch(`/api/browse_save_as?initialdir=${encodeURIComponent(startDir)}`);
         const result = await response.json();
         
         if (result.status === 'success' && result.path) {
@@ -253,6 +255,7 @@ async function saveInputAs() {
             const saveRes = await saveResp.json();
             
             if (saveRes.status === 'success') {
+                rememberBrowseDir('json-path', result.path);
                 // Change current input path to the new file
                 document.getElementById('json-path').value = result.path;
                 saveConfig(); // Persist new path in localStorage

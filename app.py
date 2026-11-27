@@ -62,7 +62,12 @@ print(path)
 @app.route('/api/browse_save_as')
 def browse_save_as():
     # Native Windows Save As dialog using subprocess to avoid Flask/Tkinter threading conflicts
-    initial_dir = os.getcwd()
+    # Start in the folder the client remembers for JSON files, else the project's JSON folder
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    initial_dir = request.args.get('initialdir', '')
+    if not initial_dir or not os.path.isdir(initial_dir):
+        project_json = os.path.join(app_dir, 'JSON')
+        initial_dir = project_json if os.path.isdir(project_json) else app_dir
     cmd = f"""import tkinter as tk, tkinter.filedialog as fd
 root = tk.Tk()
 root.attributes('-topmost', True) 
