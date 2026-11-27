@@ -67,7 +67,7 @@
 - Release 빌드에서도 PDB를 만들려면 링커 옵션 **Debug Information = Generate Debug Info (`/DEBUG`)** 를 켜세요 (코드 생성은 최적화 그대로입니다).
 
 **9. 크래시 위치 표시**
-- 프로파일 도중 DLL이 access violation 등으로 죽으면, 단순한 `OSError: access violation reading 0x...` 대신 **어느 단계(몇 번째 DLL 호출인지, 호출 뒤 측정인지)에서 실패했는지**와 **크래시가 난 모듈!함수 (파일:라인) 및 그 순간의 호출 스택**을 보여줍니다. `binnp_tracker.dll`의 벡터화된 예외 핸들러가 예외 발생 시점에 스택을 기록하고, PDB가 매칭되면 함수명과 라인까지 해석합니다.
+- 프로파일 도중 DLL이 access violation 등으로 죽으면, 단순한 `OSError: access violation reading 0x...` 대신 **어느 단계(몇 번째 DLL 호출인지, 호출 뒤 측정인지)에서 실패했는지**와 **크래시가 난 모듈!함수 (파일:라인) 및 그 순간의 호출 스택**을 보여줍니다. `bin\fnp_tracker.dll`의 벡터화된 예외 핸들러가 예외 발생 시점에 스택을 기록하고, PDB가 매칭되면 함수명과 라인까지 해석합니다.
 - `Measure live heap`(기본 켜짐)과 `Track leak call stacks`(기본 꺼짐)를 모두 끄면 예전 방식과 같은 조건으로 DLL을 호출합니다. 측정 방식 때문에 DLL이 다르게 동작하는지 의심될 때 비교용으로 쓰세요.
 
 ---
