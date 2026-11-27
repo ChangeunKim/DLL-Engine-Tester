@@ -1365,3 +1365,93 @@ body.has-fullscreen .container {
 }
 .app-footer strong { color: var(--text-primary); font-weight: 600; }
 .app-footer .footer-sep { margin: 0 10px; opacity: 0.4; }
+
+/* ==========================================================================
+   Function Name history dropdown
+   ========================================================================== */
+
+.combo { position: relative; }
+.combo input[type="text"] { padding-right: 40px; }
+
+.combo-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 38px;
+    padding: 0;
+    border: none;
+    border-radius: 0 10px 10px 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.combo-toggle:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+
+.combo-list {
+    position: absolute;
+    z-index: 70;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    max-height: 260px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(10, 12, 20, 0.985);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+.combo-list[hidden] { display: none; }
+
+.combo-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    color: var(--text-primary);
+}
+.combo-item.is-active { background: rgba(50, 115, 246, 0.22); }
+.combo-item.is-current .combo-label::after {
+    content: '  current';
+    font-family: var(--font-main);
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+}
+.combo-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.combo-del {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.55;
+}
+.combo-item:hover .combo-del,
+.combo-item.is-active .combo-del { opacity: 1; }
+.combo-del:hover { background: rgba(239, 68, 68, 0.25); color: #f87171; }
+
+.combo-empty {
+    padding: 10px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}

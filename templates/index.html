@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.9">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=2.0">
 </head>
 
 <body>
@@ -54,7 +54,21 @@
                 <div class="form-row">
                     <div class="form-group flex-2">
                         <label>Function Name</label>
-                        <input type="text" id="func-name" value="zckillerFC">
+                        <div class="combo">
+                            <input type="text" id="func-name" value="zckillerFC" autocomplete="off"
+                                spellcheck="false" role="combobox" aria-autocomplete="list"
+                                aria-expanded="false" aria-controls="func-list">
+                            <button type="button" class="combo-toggle" id="func-toggle" tabindex="-1"
+                                aria-label="Show previously used function names"
+                                title="Previously used function names">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <ul class="combo-list" id="func-list" role="listbox"
+                                aria-label="Previously used function names" hidden></ul>
+                        </div>
                     </div>
                     <div class="form-group flex-1">
                         <label>Argument Type</label>
@@ -511,6 +525,7 @@
     <script src="{{ url_for('static', filename='profiler.js') }}?v=2.0"></script>
     <script src="{{ url_for('static', filename='speed.js') }}?v=1.0"></script>
     <script src="{{ url_for('static', filename='help.js') }}?v=1.1"></script>
+    <script src="{{ url_for('static', filename='history.js') }}?v=1.1"></script>
 </body>
 
 </html>
