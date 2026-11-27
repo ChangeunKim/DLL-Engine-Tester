@@ -1,0 +1,22 @@
+{
+    "ErrorCode": -2147483646,
+    "ErrorCode_NoInput": "",
+    "ErrorCode_WrongInput": "",
+    "ErrorCode_Function": "",
+    "Curves": [],
+    "POpt": [],
+    "OpInfo": [],
+    "Price": {
+        "dirty": 118.82923851323412,
+        "Clean": -2147483646.0,
+        "Acc": 0.2193333333333385,
+        "Opt": -2147483646.0,
+        "YTM": 0.014830525075681056,
+        "YTC": 0.007679239773748847,
+        "Duration": 29.92222222222222,
+        "ModifiedD": 29.48494500595631,
+        "Convexity": 898.4160400734788,
+        "BasisPoint": -2147483646.0,
+        "CalcSpread": -2147483646.0
+    }
+}

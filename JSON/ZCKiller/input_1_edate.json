@@ -1,0 +1,297 @@
+{
+    "Function": 1,
+    "BootstrapType": 1,
+    "PriceDate": 1,
+    "SettlementDaysType": 2,
+    "EvalueDate": 20250613,
+    "SettlementDays": 0,
+    "Calendar": "Seoul",
+    "WeekendExcluded": true,
+    "ExerciseDate": 20360919,
+    "Calendars": [
+        "Seoul"
+    ],
+    "Holidays": [
+        [
+            20250815,
+            20251003,
+            20251006,
+            20251007,
+            20251008,
+            20251009,
+            20251225,
+            20251231,
+            20260101,
+            20260216,
+            20260217,
+            20260218,
+            20260501,
+            20260505,
+            20260603,
+            20260924,
+            20260925,
+            20261009,
+            20261225,
+            20261231,
+            20270101,
+            20270205,
+            20270208,
+            20270209,
+            20270301,
+            20270505,
+            20270513,
+            20270914,
+            20270915,
+            20270916,
+            20271231,
+            20280125,
+            20280126,
+            20280127,
+            20280301,
+            20280501,
+            20280502,
+            20280505,
+            20280606,
+            20280815,
+            20281002,
+            20281003,
+            20281004,
+            20281005,
+            20281009,
+            20281225,
+            20281229,
+            20290101,
+            20290212,
+            20290213,
+            20290214,
+            20290301,
+            20290501,
+            20290507,
+            20290606,
+            20290815,
+            20290921,
+            20290924,
+            20291003,
+            20291009,
+            20291225
+        ]
+    ],
+    "Curves": [
+        [
+            {
+                "Maturity": "1M",
+                "DayCountConvention": 360,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 1,
+                "CompoundingFrequency": 0,
+                "Rate": 0.0333,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "3M",
+                "DayCountConvention": 360,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 1,
+                "CompoundingFrequency": 0,
+                "Rate": 0.03361,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "6M",
+                "DayCountConvention": 360,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 1,
+                "CompoundingFrequency": 0,
+                "Rate": 0.0335,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "1Y",
+                "DayCountConvention": 360,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 1,
+                "CompoundingFrequency": 0,
+                "Rate": 0.03276,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "2Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03199,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "3Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03208,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "5Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03181,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "7Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03145,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "10Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03106,
+                "RateShift": 0,
+                "PriceDate": 2
+            },
+            {
+                "Maturity": "30Y",
+                "DayCountConvention": 20,
+                "BusinessDayConvention": 5,
+                "Calendar": "Seoul",
+                "InstrumentType": 2,
+                "CompoundingFrequency": 2,
+                "Rate": 0.03139,
+                "RateShift": 0,
+                "PriceDate": 2
+            }
+        ]
+    ],
+    "OutputControl": {
+        "Curves": true,
+        "MonthlyFactors": false
+    },
+    "CashFlow": [
+        [
+            {
+                "StartDate": 20160919,
+                "EndDate": 20260919,
+                "PCap": 0,
+                "PCF": 0
+            },
+            {
+                "StartDate": 20260919,
+                "EndDate": 20360919,
+                "PCap": 0,
+                "PCF": 0
+            },
+            {
+                "StartDate": 20360919,
+                "EndDate": 20460919,
+                "PCap": 100,
+                "PCF": 184.6
+            }
+        ]
+    ],
+    "IRS": {
+        "Tenor": [
+            "1D",
+            "91D",
+            "6M",
+            "9M",
+            "1Y",
+            "1Y6M",
+            "2Y",
+            "3Y",
+            "4Y",
+            "5Y",
+            "6Y",
+            "7Y",
+            "8Y",
+            "9Y",
+            "10Y",
+            "12Y",
+            "15Y",
+            "20Y"
+        ],
+        "Rate": [
+            0.036,
+            0.0383,
+            0.03705,
+            0.0362,
+            0.03535,
+            0.03385,
+            0.0342412,
+            0.030825,
+            0.0304,
+            0.03004,
+            0.00029863,
+            0.00029825,
+            0.000298,
+            0.00029825,
+            0.000299,
+            0.00030062,
+            0.030175,
+            0.029863
+        ]
+    },
+    "EffectiveDate": 20160919,
+    "Maturity": 20460919,
+    "DayCountConv": 3606,
+    "BusinessDayConv": 1,
+    "CouponType": 4,
+    "CouponFrequency": 0,
+    "SimN": 10000,
+    "IRR": true,
+    "IRRValue": 0.0282,
+    "Adjustment": 5,
+    "Notional": 100,
+    "KRW": false,
+    "TargetPrice": 99.9999954847589,
+    "Price": 99.9999954847589,
+    "HW": {
+        "vol": 0.01139875375,
+        "alpha": 0.03695478918
+    },
+    "voltype": 0,
+    "Notice": {
+        "Standard": 1,
+        "Day": 0
+    },
+    "CouponDate": [
+        20460919
+    ],
+    "CouponValue": [],
+    "CallDate": [
+        20260919,
+        20360919
+    ],
+    "CallValue": [],
+    "TargetYTM": 0.029244921410529,
+    "CalcMethod": 1,
+    "CalcDate": 20250613,
+    "Spread": -2.38367617130279E-02
+}

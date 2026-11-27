@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FnGenesis DLL Tester</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.6">
+</head>
+
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="container glass-panel">
+        <header>
+            <h1>FnGenesis <span>DLL Tester</span></h1>
+        </header>
+
+        <div class="content">
+            <div class="panel controls-panel">
+                <div class="section-title">Configuration</div>
+
+                <!-- DLL Path -->
+                <div class="form-group">
+                    <label>DLL Path</label>
+                    <div class="input-with-button">
+                        <input type="text" id="dll-path" placeholder="Select a .dll file..." value="">
+                        <button class="btn btn-secondary"
+                            onclick="openFileBrowser('dll-path', '.dll', '')">Browse</button>
+                    </div>
+                </div>
+
+                <!-- Function Details -->
+                <div class="form-row">
+                    <div class="form-group flex-2">
+                        <label>Function Name</label>
+                        <input type="text" id="func-name" value="zckillerFC">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Argument Type</label>
+                        <select id="arg-type">
+                            <option value="c_wchar_p" selected>[c_wchar_p]</option>
+                            <option value="c_wchar_p_ptr">[c_wchar_p, POINTER(c_wchar_p)]</option>
+                        </select>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Return Type</label>
+                        <select id="res-type">
+                            <option value="c_wchar_p" selected>c_wchar_p</option>
+                            <option value="c_double">c_double</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- JSON Path -->
+                <div class="form-group">
+                    <label>Input JSON Path <span class="status-badge" id="input-status"
+                            style="display:none; padding:2px 8px; font-size:0.7rem; float:right;"></span></label>
+                    <div class="input-with-button">
+                        <input type="text" id="json-path" placeholder="Select an input .json file..." value="">
+                        <button class="btn btn-secondary"
+                            onclick="openFileBrowser('json-path', '.json', '')">Browse</button>
+                        <button class="btn btn-secondary"
+                            onclick="createNewJsonFile()">New File</button>
+                    </div>
+                </div>
+
+                <div id="input-terminal" class="terminal-window"
+                    style="height: 350px; min-height: 250px; margin-bottom: 20px;">
+                    <div class="terminal-header"
+                        style="padding: 6px 15px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.8rem; color: #94a3b8;">Input JSON Editor</span>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button id="save-input-btn" class="btn btn-secondary"
+                                style="padding: 2px 8px; font-size: 0.75rem; display: none;"
+                                onclick="saveInputToFile()">💾 Save</button>
+                            <button id="save-as-btn" class="btn btn-secondary"
+                                style="padding: 2px 8px; font-size: 0.75rem; display: none;" onclick="saveInputAs()">📁
+                                Save As</button>
+                            <button class="fullscreen-btn" onclick="toggleFullscreen('input-terminal')"
+                                title="Toggle Fullscreen">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path
+                                        d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3">
+                                    </path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="input-view" class="editor-textarea" spellcheck="false"
+                        placeholder="// Select a JSON file or type here..."></textarea>
+                </div>
+
+                <!-- Action -->
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <button class="btn btn-primary run-btn" onclick="executeDll()" id="run-btn" style="flex: 1;">
+                        <span class="btn-text">Execute DLL</span>
+                        <span class="loader" id="btn-loader" style="display: none;"></span>
+                    </button>
+                    <label
+                        style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-muted); font-size: 0.9rem;">
+                        <input type="checkbox" id="debug-mode"
+                            style="width: 16px; height: 16px; accent-color: var(--accent-blue);">
+                        VS Debug Pause
+                    </label>
+                </div>
+            </div>
+
+            <div class="panel output-panel">
+                <div class="section-header">
+                    <div class="section-title">Execution Output</div>
+                    <span class="status-badge" id="status-badge">Idle</span>
+                </div>
+                <div id="output-terminal" class="terminal-window" style="height: 650px; min-height: 300px;">
+                    <div class="terminal-header" style="justify-content: space-between; align-items: center;">
+                        <div style="display: flex; gap: 8px;">
+                            <span class="mac-btn close"></span>
+                            <span class="mac-btn minimize"></span>
+                            <span class="mac-btn expand"></span>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button id="save-btn" class="btn btn-secondary"
+                                style="padding: 4px 10px; font-size: 0.8rem; display: none;"
+                                onclick="saveJsonOutput()">💾
+                                Save JSON</button>
+                            <button class="fullscreen-btn" onclick="toggleFullscreen('output-terminal')"
+                                title="Toggle Fullscreen">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path
+                                        d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3">
+                                    </path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <pre><code id="output-view" class="language-json">// JSON Output will appear here...</code></pre>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 Memory Profiler: repeat the same input N times and watch what
+                 the DLL keeps. Uses the DLL path, function and type settings
+                 from Configuration above.
+                 ============================================================ -->
+            <div class="panel profile-panel">
+                <div class="section-header">
+                    <div class="section-title">Memory Profiler</div>
+                    <span class="status-badge" id="prof-badge">Idle</span>
+                </div>
+
+                <!-- One control row, above everything it scopes -->
+                <div class="profile-controls">
+                    <div class="form-group profile-field-sm">
+                        <label for="prof-iterations" title="How many times to call the DLL with the same input">Iterations</label>
+                        <input type="number" id="prof-iterations" min="1" max="10000" step="1" value="30">
+                    </div>
+                    <div class="form-group profile-field-sm">
+                        <label for="prof-warmup" title="Leading calls excluded from the leak regression">Warmup</label>
+                        <input type="number" id="prof-warmup" min="0" max="9999" step="1" value="3">
+                    </div>
+                    <div class="form-group profile-field-md">
+                        <label for="prof-free-mode" title="Who releases the string buffer the DLL allocates: the out-pointer buffer, or the returned string when the return type is c_wchar_p / c_char_p">Output buffer release</label>
+                        <select id="prof-free-mode">
+                            <option value="none" selected>Do not free (default)</option>
+                            <option value="sysfree">SysFreeString (BSTR)</option>
+                            <option value="cotaskmem">CoTaskMemFree</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary profile-run-btn" id="prof-run-btn" onclick="runMemoryProfile()">
+                        <span class="btn-text">Run Memory Profile</span>
+                        <span class="loader" id="prof-loader" style="display: none;"></span>
+                    </button>
+                    <button class="btn btn-secondary" id="prof-cancel-btn" onclick="cancelMemoryProfile()"
+                        style="display: none;">Cancel</button>
+
+                    <div class="profile-progress">
+                        <span id="prof-progress-text">Not started</span>
+                        <div class="profile-progress-bar"><span id="prof-progress-fill"></span></div>
+                    </div>
+                </div>
+
+                <div class="profile-empty" id="prof-empty">
+                    Runs the selected DLL function repeatedly against the same input JSON in a
+                    fresh process, sampling private bytes and working set around every call.<br>
+                    Set an iteration count and press <strong>Run Memory Profile</strong>.
+                </div>
+
+                <div id="prof-results" hidden>
+                    <!-- Verdict: status color, always with an icon and a word -->
+                    <div class="verdict-banner verdict-unknown" id="prof-verdict">
+                        <div class="verdict-icon" id="prof-verdict-icon" aria-hidden="true">?</div>
+                        <div class="verdict-body">
+                            <div class="verdict-title" id="prof-verdict-title">Running</div>
+                            <div class="verdict-detail" id="prof-verdict-detail">Collecting samples...</div>
+                            <ul class="verdict-notes" id="prof-notes"></ul>
+                        </div>
+                    </div>
+
+                    <div id="prof-body">
+                    <!-- The hero figure: the one number this panel answers -->
+                    <div class="profile-hero">
+                        <div class="profile-hero-label">Memory retained per call, after warmup</div>
+                        <div class="profile-hero-value" id="prof-hero-value">--</div>
+                        <div class="profile-hero-unit" id="prof-hero-unit">per call</div>
+                        <div class="profile-hero-sub" id="prof-hero-sub"></div>
+                    </div>
+
+                    <div class="stat-grid" id="prof-stats"></div>
+
+                    <!-- Chart 1: the leak signal -->
+                    <div class="chart-card">
+                        <div class="chart-head">
+                            <div class="chart-title">Memory held after each call</div>
+                            <div class="chart-legend" id="prof-legend-held"></div>
+                        </div>
+                        <div class="chart-subtitle">
+                            Private bytes is the commit charge, the reliable leak signal. Working set
+                            is the resident part and the OS may trim it at any time.
+                        </div>
+                        <div class="chart-plot" id="prof-chart-held">
+                            <div class="chart-tooltip" id="prof-tip-held"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chart 2: which calls retained, zero-based and diverging -->
+                    <div class="chart-card">
+                        <div class="chart-head">
+                            <div class="chart-title">Change in private bytes per call</div>
+                            <div class="chart-legend" id="prof-legend-delta"></div>
+                        </div>
+                        <div class="chart-subtitle">
+                            Each column is one call's net effect. A steady run of positive columns is
+                            a leak; isolated spikes are usually heap arena growth or a lazy cache.
+                        </div>
+                        <div class="chart-plot" id="prof-chart-delta">
+                            <div class="chart-tooltip" id="prof-tip-delta"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chart 3: how much it holds while working -->
+                    <div class="chart-card">
+                        <div class="chart-head">
+                            <div class="chart-title">Transient memory during each call</div>
+                            <div class="chart-legend" id="prof-legend-transient"></div>
+                        </div>
+                        <div class="chart-subtitle">
+                            In-call high-water mark minus what was still held on return, sampled every
+                            5 ms while the call runs. This is scratch memory the DLL needs but gives back.
+                        </div>
+                        <div class="chart-plot" id="prof-chart-transient">
+                            <div class="chart-tooltip" id="prof-tip-transient"></div>
+                        </div>
+                    </div>
+
+                    <div class="profile-table-toggle">
+                        <button class="btn btn-secondary" id="prof-table-btn" onclick="toggleProfileTable()">
+                            Show per-call table</button>
+                        <button class="btn btn-secondary" onclick="downloadProfileCsv()">Download CSV</button>
+                    </div>
+                    <div class="profile-table-wrap" id="prof-table-wrap" hidden>
+                        <table class="profile-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Call</th>
+                                    <th scope="col">Private bytes</th>
+                                    <th scope="col">Delta</th>
+                                    <th scope="col">Working set</th>
+                                    <th scope="col">In-call peak</th>
+                                    <th scope="col">Transient</th>
+                                    <th scope="col">Duration</th>
+                                    <th scope="col">Output digest</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prof-table-body"></tbody>
+                        </table>
+                    </div>
+
+                    <dl class="profile-detail-grid" id="prof-details"></dl>
+                    </div><!-- /prof-body -->
+
+                    <div class="profile-logs" id="prof-logs" hidden>
+                        <div class="stat-label">DLL stdout / stderr during the run</div>
+                        <pre id="prof-logs-body"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cache-bussed JS Script -->
+    <script src="{{ url_for('static', filename='script.js') }}?v=2.3"></script>
+    <script src="{{ url_for('static', filename='profiler.js') }}?v=1.0"></script>
+</body>
+
+</html>

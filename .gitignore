@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+log_debug.txt
+JSON/output_json/
+# native build output
+native/build/
+bin/
+*.obj
+*.pdb
+*.ilk
+*.exp

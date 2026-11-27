@@ -1,0 +1,11 @@
+{
+    "ErrorCode": -2147483646,
+    "ErrorCode_NoInput": "",
+    "ErrorCode_WrongInput": "",
+    "ErrorCode_Function": "",
+    "Price": {
+        "dirty": 99.99999548475866,
+        "Clean": 75.37199548475866,
+        "Acc": 24.627999999999998
+    }
+}

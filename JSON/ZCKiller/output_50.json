@@ -1,0 +1,179 @@
+{
+    "DirtyPrice": 99.99999452121604,
+    "CleanPrice": 75.37199452121604,
+    "AccInterest": 24.628000000000004,
+    "Non-Callable": 154.1711695171171,
+    "OptionPrice": -54.17117499590107,
+    "YTM": -2147483646.0,
+    "YTC": -2147483646.0,
+    "MacDuration": -2147483646.0,
+    "ModDuration": -2147483646.0,
+    "Convexity": -2147483646.0,
+    "BasisPoint": -2147483646.0,
+    "CalcSpread": -0.0055655881762504585,
+    "trialSpread": -2147483646.0,
+    "trialModelPrice": -2147483646.0,
+    "Calibrations": [
+        {
+            "Alpha": 0.03695478918,
+            "Beta": -2147483646.0,
+            "Rho": -2147483646.0,
+            "TermVol": [
+                {
+                    "Date": 20460919,
+                    "DateE": 53589,
+                    "Sigma": 0.01139875375,
+                    "Eta": -2147483646.0
+                }
+            ]
+        }
+    ],
+    "Curves": [
+        [
+            {
+                "Date": 20250713,
+                "DateE": 45851,
+                "ZCR": 0.033715741015396046
+            },
+            {
+                "Date": 20250913,
+                "DateE": 45913,
+                "ZCR": 0.033931291568745026
+            },
+            {
+                "Date": 20251213,
+                "DateE": 46004,
+                "ZCR": 0.03367931944549856
+            },
+            {
+                "Date": 20260613,
+                "DateE": 46186,
+                "ZCR": 0.03267530013648602
+            },
+            {
+                "Date": 20270613,
+                "DateE": 46551,
+                "ZCR": 0.03171571880798292
+            },
+            {
+                "Date": 20280613,
+                "DateE": 46917,
+                "ZCR": 0.03180119443204973
+            },
+            {
+                "Date": 20300613,
+                "DateE": 47647,
+                "ZCR": 0.03152156073869133
+            },
+            {
+                "Date": 20320613,
+                "DateE": 48378,
+                "ZCR": 0.03114237556724219
+            },
+            {
+                "Date": 20350613,
+                "DateE": 49473,
+                "ZCR": 0.03072609189345976
+            },
+            {
+                "Date": 20550613,
+                "DateE": 56778,
+                "ZCR": 0.031194408439588695
+            }
+        ]
+    ],
+    "Bootstraps": [],
+    "ReceiverCashflow": [
+        {
+            "PeriodID": 0.0,
+            "FixingDate": -2147483646,
+            "StartDate": 20260919,
+            "EndDate": 20260919,
+            "PaymentDate": -2147483646,
+            "FixingDateE": -2147483646,
+            "StartDateE": 46284,
+            "EndDateE": 46284,
+            "PaymentDateE": -2147483646,
+            "DayCountFraction": -2147483646.0,
+            "AccDayCountFraction": 0.0,
+            "Principal": 0.0,
+            "Notional": 100.0,
+            "InterestAmount": 0.0,
+            "AccInterestAmount": 0.0,
+            "InterestRate": 0.0282,
+            "CashFlow": 0.0,
+            "DiscountRate": 0.02693981277329784,
+            "DF_Bootstrap": 0.9664043331713561,
+            "DF_SimAverage": 0.9664043331714792,
+            "LSMC_Probability": 0.0,
+            "LSMC_Capital": 0.0,
+            "LSMC_InterestAmt": 0.0,
+            "LSMC_AverageCF": 0.0,
+            "LSMC_AverageDF": 0.9664043331714792,
+            "LSMC_PV": 0.0,
+            "LSMC_SWProbability": 0.0
+        },
+        {
+            "PeriodID": 1.0,
+            "FixingDate": -2147483646,
+            "StartDate": 20360919,
+            "EndDate": 20360919,
+            "PaymentDate": -2147483646,
+            "FixingDateE": -2147483646,
+            "StartDateE": 49937,
+            "EndDateE": 49937,
+            "PaymentDateE": -2147483646,
+            "DayCountFraction": -2147483646.0,
+            "AccDayCountFraction": 0.0,
+            "Principal": 0.0,
+            "Notional": 100.0,
+            "InterestAmount": 0.0,
+            "AccInterestAmount": 0.0,
+            "InterestRate": 0.0282,
+            "CashFlow": 0.0,
+            "DiscountRate": 0.025283721442974687,
+            "DF_Bootstrap": 0.7519260833258321,
+            "DF_SimAverage": 0.7473513219271437,
+            "LSMC_Probability": 0.0,
+            "LSMC_Capital": 0.0,
+            "LSMC_InterestAmt": 0.0,
+            "LSMC_AverageCF": 0.0,
+            "LSMC_AverageDF": 0.7473513219271437,
+            "LSMC_PV": 0.0,
+            "LSMC_SWProbability": 0.0
+        },
+        {
+            "PeriodID": 2.0,
+            "FixingDate": 20460919,
+            "StartDate": 20160919,
+            "EndDate": 20460919,
+            "PaymentDate": 20460919,
+            "FixingDateE": 53589,
+            "StartDateE": 42632,
+            "EndDateE": 53589,
+            "PaymentDateE": 53589,
+            "DayCountFraction": 30.0,
+            "AccDayCountFraction": 8.733333333333334,
+            "Principal": 100.0,
+            "Notional": 100.0,
+            "InterestAmount": 84.60000000000002,
+            "AccInterestAmount": 24.628000000000004,
+            "InterestRate": 0.0282,
+            "CashFlow": 184.60000000000002,
+            "DiscountRate": 0.025503607268255433,
+            "DF_Bootstrap": 0.5811347269432935,
+            "DF_SimAverage": 0.5417117796382253,
+            "LSMC_Probability": 0.9999999999999062,
+            "LSMC_Capital": 99.99999999999062,
+            "LSMC_InterestAmt": 84.60000000004027,
+            "LSMC_AverageCF": 184.6000000000309,
+            "LSMC_AverageDF": 0.5417117796381349,
+            "LSMC_PV": 99.99999452121644,
+            "LSMC_SWProbability": 0.0
+        }
+    ],
+    "ErrorCode": -2147483646,
+    "ErrorCode_NoInput": "",
+    "ErrorCode_WrongInput": "",
+    "ErrorCode_Function": ""
+}
