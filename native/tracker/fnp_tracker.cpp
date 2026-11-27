@@ -448,12 +448,162 @@ TRK_API int fnp_tracker_attach(void* hmodule) {
     return n;
 }
 
+// Tells the symbolizer which module is the DLL under test without patching anything
+// (used by crash reports when allocation tracking is off).
+TRK_API void fnp_tracker_set_target(void* hmodule) {
+    HMODULE mod = (HMODULE)hmodule;
+    auto dos = (IMAGE_DOS_HEADER*)mod;
+    auto nt = (IMAGE_NT_HEADERS64*)((BYTE*)mod + dos->e_lfanew);
+    g_targetLo = (uintptr_t)mod;
+    g_targetHi = g_targetLo + nt->OptionalHeader.SizeOfImage;
+    char path[MAX_PATH] = {};
+    GetModuleFileNameA(mod, path, MAX_PATH);
+    g_targetName = BaseName(path);
+}
+
 TRK_API void fnp_tracker_begin_call(uint32_t call) { g_call.store(call); }
 
 // Releases a block the harness itself freed (BSTR / CoTaskMem the caller owns).
 TRK_API void fnp_untrack(void* p) { untrack(p); }
 
 TRK_API void fnp_tracker_set_symbol_path(const wchar_t* path) { g_symPath = path ? path : L""; }
+
+// --- Crash forensics -------------------------------------------------------------------
+// ctypes turns a hardware exception inside a foreign call into a bare
+// "OSError: access violation reading 0x..." with no location. A vectored exception
+// handler sees the exception FIRST, on the faulting thread with the faulting context,
+// so it can record the exact instruction and unwind the real call stack. The record is
+// symbolized on request (fnp_crash_report) once Python has caught the OSError.
+struct CrashRec {
+    bool have = false;
+    DWORD code = 0;
+    ULONG_PTR kind = 0, addr = 0;
+    DWORD tid = 0;
+    int n = 0;
+    uintptr_t frames[48];
+};
+static CrashRec g_crash;
+static SRWLOCK g_crashLock = SRWLOCK_INIT;
+static PVOID g_veh = nullptr;
+
+static bool safe_read_u64(uintptr_t at, uint64_t* out) {
+    __try {
+        *out = *(volatile uint64_t*)at;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+static bool is_fatal_code(DWORD c) {
+    switch (c) {
+    case EXCEPTION_ACCESS_VIOLATION: case EXCEPTION_IN_PAGE_ERROR: case EXCEPTION_ILLEGAL_INSTRUCTION:
+    case EXCEPTION_PRIV_INSTRUCTION: case EXCEPTION_INT_DIVIDE_BY_ZERO: case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+    case EXCEPTION_STACK_OVERFLOW: case 0xC0000374 /*heap corruption*/: case 0xC0000409 /*fast fail*/:
+        return true;
+    }
+    return false;
+}
+
+static LONG CALLBACK crash_veh(PEXCEPTION_POINTERS ep) {
+    PEXCEPTION_RECORD er = ep->ExceptionRecord;
+    if (!is_fatal_code(er->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
+
+    CrashRec r;
+    r.have = true;
+    r.code = er->ExceptionCode;
+    r.tid = GetCurrentThreadId();
+    if (er->NumberParameters >= 2) { r.kind = er->ExceptionInformation[0]; r.addr = er->ExceptionInformation[1]; }
+
+    CONTEXT c = *ep->ContextRecord;
+    // Unwinding from a stack-overflow handler would overflow again: record only the PC.
+    int limit = er->ExceptionCode == EXCEPTION_STACK_OVERFLOW ? 1 : 48;
+    for (; r.n < limit; ) {
+        r.frames[r.n++] = (uintptr_t)c.Rip;
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION rf = RtlLookupFunctionEntry(c.Rip, &base, nullptr);
+        if (!rf) {                       // leaf function: return address is at [rsp]
+            uint64_t ret = 0;
+            if (!c.Rsp || !safe_read_u64((uintptr_t)c.Rsp, &ret)) break;
+            c.Rip = ret;
+            c.Rsp += 8;
+        } else {
+            PVOID handlerData = nullptr;
+            DWORD64 establisher = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, c.Rip, rf, &c, &handlerData, &establisher, nullptr);
+        }
+        if (!c.Rip) break;
+    }
+
+    AcquireSRWLockExclusive(&g_crashLock);
+    g_crash = r;    // the latest fatal-looking exception wins: it is the one Python sees
+    ReleaseSRWLockExclusive(&g_crashLock);
+    return EXCEPTION_CONTINUE_SEARCH;   // never swallow: the normal handlers still run
+}
+
+TRK_API void fnp_crash_install() {
+    if (!g_veh) g_veh = AddVectoredExceptionHandler(1, crash_veh);
+}
+
+TRK_API void fnp_crash_clear() {
+    AcquireSRWLockExclusive(&g_crashLock);
+    g_crash = CrashRec();
+    ReleaseSRWLockExclusive(&g_crashLock);
+}
+
+// Symbolizes the recorded crash into a JSON file. Returns 0 on success, 1 if no crash
+// was recorded, negative on I/O error.
+TRK_API int fnp_crash_report(const wchar_t* outPath) {
+    CrashRec r;
+    AcquireSRWLockExclusive(&g_crashLock);
+    r = g_crash;
+    ReleaseSRWLockExclusive(&g_crashLock);
+    if (!r.have) return 1;
+
+    Symbolizer sym;
+    bool symOk = sym.init(GetCurrentProcess(), g_symPath, true);
+    sym.targetModule = g_targetName;
+
+    std::string js = "{";
+    char nb[160];
+    snprintf(nb, sizeof nb, "\"code\":\"0x%08lX\",\"kind\":%llu,\"address\":\"0x%llx\",\"thread\":%lu,",
+             (unsigned long)r.code, (unsigned long long)r.kind, (unsigned long long)r.addr,
+             (unsigned long)r.tid);
+    js += nb;
+    js += "\"target\":\"" + JsonEscape(g_targetName) + "\",\"frames\":[";
+    bool first = true;
+    for (int i = 0; i < r.n; i++) {
+        std::vector<SymFrame> frames;
+        sym.resolve((DWORD64)r.frames[i], i != 0, frames, true);
+        for (auto& f : frames) {
+            if (!first) js += ",";
+            first = false;
+            std::string mod = f.module;
+            js += "{\"module\":\"" + JsonEscape(mod) + "\",\"func\":\"" + JsonEscape(f.func) +
+                  "\",\"file\":\"" + JsonEscape(f.file) + "\",";
+            snprintf(nb, sizeof nb, "\"line\":%u,\"inlined\":%s,\"index\":%d}", f.line,
+                     f.inlined ? "true" : "false", i);
+            js += nb;
+        }
+    }
+    js += "]";
+    {
+        std::string tmod, tpdb;
+        int ttype = -1;
+        if (symOk && g_targetLo) sym.moduleInfo(g_targetLo + 16, tmod, tpdb, ttype);
+        snprintf(nb, sizeof nb, ",\"sym_type\":%d,\"pdb\":", ttype);
+        js += nb;
+        js += "\"" + JsonEscape(tpdb) + "\"";
+    }
+    js += "}";
+    sym.shutdown();
+
+    FILE* fp = _wfopen(outPath, L"wb");
+    if (!fp) return -2;
+    fwrite(js.data(), 1, js.size(), fp);
+    fclose(fp);
+    return 0;
+}
 
 TRK_API void fnp_tracker_stats(uint64_t* allocs, uint64_t* frees, uint64_t* live_blocks,
                                uint64_t* live_bytes) {

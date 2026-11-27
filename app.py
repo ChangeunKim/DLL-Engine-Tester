@@ -481,6 +481,7 @@ def profile():
         "unload_after": bool(data.get('unload_after', True)),
         "sample_interval_ms": data.get('sample_interval_ms', 5),
         "track_allocs": track,
+        "measure_heap": bool(data.get('measure_heap', True)),
         "top_sites": data.get('top_sites', 30),
         "symbol_path": symbol_path,
         "symbols": check,

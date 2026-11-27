@@ -1400,6 +1400,9 @@
         }
         if (ev.event === 'error') {
             state.error = ev.message;
+            state.stage = ev.stage || '';
+            state.crash = ev.crash || null;
+            state.crashSummary = ev.crash_summary || '';
             state.logs = ev.logs || '';
             state.trace = ev.traceback || '';
             return;
@@ -1439,6 +1442,9 @@
         state.start = null;
         state.logs = '';
         state.error = null;
+        state.stage = '';
+        state.crash = null;
+        state.crashSummary = '';
         state.trace = '';
         state.exit = null;
         state.noise = [];
@@ -1472,6 +1478,7 @@
                 free_mode: $('prof-free-mode').value,
                 unload_after: true,
                 track_allocs: $('prof-track').checked,
+                measure_heap: $('prof-heap').checked,
                 pdb_path: window.FnpSymbols ? window.FnpSymbols.path() : ''
             }),
             signal: state.controller.signal
@@ -1549,9 +1556,11 @@
             var tail = done
                 ? ' A stop this far in is itself a finding - the run up to that point is charted below.'
                 : '';
+            var failed = state.stage ? 'The run failed during ' + state.stage : 'The DLL call failed';
             var detail = state.error
-                ? 'The DLL call failed' + where + ': ' +
-                  state.error.replace(/[.\s]+$/, '') + '.' + tail
+                ? failed + where + ': ' +
+                  state.error.replace(/[.\s]+$/, '') + '.' +
+                  (state.crashSummary ? ' Crash location: ' + state.crashSummary + '.' : '') + tail
                 : 'The profile runner exited' + where +
                   (code !== null ? ' (exit code ' + code + ')' : '') + '.' + tail;
 
@@ -1569,7 +1578,7 @@
             $('prof-verdict-detail').textContent = detail;
             $('prof-notes').textContent = '';
 
-            var extra = [state.trace, state.exit && state.exit.stderr, state.logs, noise]
+            var extra = [crashStackText(), state.trace, state.exit && state.exit.stderr, state.logs, noise]
                 .filter(Boolean).join('\n\n');
             $('prof-logs').hidden = !extra;
             $('prof-logs-body').textContent = extra;
@@ -1602,6 +1611,7 @@
         localStorage.setItem('fnp_prof_warmup', $('prof-warmup').value);
         localStorage.setItem('fnp_prof_free_mode', $('prof-free-mode').value);
         localStorage.setItem('fnp_prof_track', $('prof-track').checked ? '1' : '0');
+        localStorage.setItem('fnp_prof_heap', $('prof-heap').checked ? '1' : '0');
     }
 
     function loadProfileConfig() {
@@ -1612,20 +1622,37 @@
         var fm = localStorage.getItem('fnp_prof_free_mode');
         if (fm) $('prof-free-mode').value = fm;
         $('prof-track').checked = localStorage.getItem('fnp_prof_track') === '1';
+        $('prof-heap').checked = localStorage.getItem('fnp_prof_heap') !== '0';
+    }
+
+    /* The exact stack of a hardware exception (access violation etc.), recorded at the
+       moment it happened, so a crash points at a function and line instead of a bare
+       "OSError: access violation reading 0x...". */
+    function crashStackText(crash, summary) {
+        crash = crash || state.crash;
+        summary = summary || state.crashSummary;
+        if (!crash || !crash.frames || !crash.frames.length) return '';
+        var frames = crash.frames.slice(0, 18);
+        var lines = frames.map(function (f, i) {
+            return '  ' + (i < 10 ? ' ' : '') + i + '  ' + f.module + '!' + f.func +
+                (f.file ? '   ' + f.file + ':' + f.line : '') + (f.inlined ? '   [inlined]' : '');
+        });
+        if (crash.frames.length > frames.length) lines.push('  ... ' + (crash.frames.length - frames.length) + ' more frames');
+        return 'Crash: ' + summary + '\nStack at the moment of the fault (innermost first):\n' + lines.join('\n');
     }
 
     // Small, stable surface for the speed profiler (static/speed.js) to reuse.
     window.FnpViz = {
         VIZ: VIZ, fmtBytes: fmtBytes, fmtInt: fmtInt, fmtMs: fmtMs, el: el, text: text,
         niceStep: niceStep, renderLegend: renderLegend, tile: tile, detailRow: detailRow,
-        baseName: baseName, span: span
+        baseName: baseName, span: span, crashStackText: crashStackText
     };
 
     // --- Boot ---------------------------------------------------------------
 
     window.addEventListener('load', function () {
         loadProfileConfig();
-        ['prof-iterations', 'prof-warmup', 'prof-free-mode', 'prof-track'].forEach(function (id) {
+        ['prof-iterations', 'prof-warmup', 'prof-free-mode', 'prof-track', 'prof-heap'].forEach(function (id) {
             var node = $(id);
             if (node) node.addEventListener('change', saveProfileConfig);
         });

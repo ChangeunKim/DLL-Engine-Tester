@@ -449,6 +449,55 @@ def build_caller(dll, func_name, arg_type_str, res_type_str, input_str, free_mod
     return call
 
 
+def install_crash_probe(tracker=None):
+    """Load fnp_tracker.dll just for its exception recorder (when it is built).
+
+    Returns the Tracker instance (shared with allocation tracking if one exists) or
+    None. A missing/unloadable helper must never stop a profile run."""
+    try:
+        if tracker is None:
+            from native_tools import Tracker
+            tracker = Tracker()
+        tracker.crash_install()
+        return tracker
+    except Exception:
+        return None
+
+
+def collect_crash(probe, symbol_path, dll=None):
+    """Symbolized description of the last hardware exception, or None."""
+    if probe is None:
+        return None
+    try:
+        if dll is not None:
+            probe.dll.fnp_tracker_set_target(dll._handle)
+        return probe.crash_report(symbol_path or '')
+    except Exception:
+        return None
+
+
+def describe_crash(crash):
+    """One line naming the fault, e.g. 'read access violation at 0x... in Foo (file:12)'."""
+    if not crash:
+        return ''
+    kinds = {0: 'reading', 1: 'writing', 8: 'executing'}
+    code = crash.get('code', '')
+    what = {'0xC0000005': 'Access violation', '0xC0000374': 'Heap corruption detected',
+            '0xC0000409': 'Fast-fail (stack buffer overrun / CFG)', '0xC00000FD': 'Stack overflow',
+            '0xC0000094': 'Integer divide by zero', '0xC000001D': 'Illegal instruction',
+            '0xC0000006': 'In-page error'}.get(code, 'Exception ' + code)
+    if code in ('0xC0000005', '0xC0000006'):
+        what += ' ' + kinds.get(crash.get('kind'), 'accessing') + ' ' + crash.get('address', '')
+    frames = crash.get('frames') or []
+    top = frames[0] if frames else None
+    where = ''
+    if top:
+        where = ' in ' + top.get('module', '?') + '!' + top.get('func', '?')
+        if top.get('file'):
+            where += ' (' + top['file'].replace('/', '\\').split('\\')[-1] + ':' + str(top.get('line', 0)) + ')'
+    return what + where
+
+
 VERDICT_RANK = {'insufficient': 0, 'clean': 1, 'suspect': 2, 'leak': 3}
 
 
@@ -582,6 +631,7 @@ def main():
     free_mode = req.get('free_mode', 'none')
     unload = bool(req.get('unload_after', True))
     track = bool(req.get('track_allocs', False))
+    measure_heap = bool(req.get('measure_heap', True))
     symbol_path = req.get('symbol_path', '') or ''
     top_sites = max(1, min(int(req.get('top_sites', 30)), 200))
 
@@ -589,6 +639,10 @@ def main():
     sampler = None
     dll = None
     tracker = None
+    crash_probe = None
+    # Which step was running when something failed: the DLL call itself, or the
+    # harness measuring around it. An exception text alone cannot tell them apart.
+    stage = 'loading the input'
 
     try:
         with open(json_path, 'r', encoding='UTF-8') as f:
@@ -603,9 +657,14 @@ def main():
                              'Run native\\build.bat to build bin\\fnp_tracker.dll.')
                 track = False
 
+        crash_probe = install_crash_probe(tracker)
         heap_meter = HeapMeter(exclude=[tracker.heap] if tracker else [])
+        if not measure_heap:
+            heap_meter.available = False
+            notes.append('Live heap metering is off: the verdict uses private bytes only.')
         clock = CycleClock()
 
+        stage = 'loading the DLL'
         pre_load = mem_event()
         t_load = time.perf_counter()
         dll = WinDLL(dll_path)
@@ -676,10 +735,12 @@ def main():
             sampler.peak_rss = 0
             if tracker is not None:
                 tracker.begin_call(i + 1)
+            stage = f'DLL call {i + 1}'
             sampler.arm()
             t0 = time.perf_counter()
             digest, size, _ = call()
             total = (time.perf_counter() - t0) * 1000.0
+            stage = f'memory measurement after call {i + 1}'
             imm_private, imm_rss = mem()
             sampler.disarm()
 
@@ -688,6 +749,7 @@ def main():
             gc.collect()
             held_private, held_rss = mem()
             if heap_meter.available:
+                stage = f'heap measurement after call {i + 1}'
                 held_alloc, held_commit = heap_meter.read()
             else:
                 held_alloc = held_commit = 0
@@ -726,6 +788,7 @@ def main():
 
         sampler.shutdown()
         sampler = None
+        stage = 'analysing the results'
 
         final = {'private': priv[iterations - 1], 'rss': rss[iterations - 1]}
         final_heap = ({'alloc': h_alloc[iterations - 1], 'commit': h_commit[iterations - 1]}
@@ -831,7 +894,7 @@ def main():
                 'Private bytes keep growing but live heap allocations do not: the heap is '
                 'holding freed pages committed (fragmentation or allocator caching). This is '
                 'usually not a leak; raise the iteration count to see whether it plateaus.')
-        if heap_summary is None:
+        if heap_summary is None and measure_heap:
             notes.append('HeapSummary was not readable, so the verdict uses private bytes only.')
         if tracker is not None:
             notes.append('Allocation tracking is on: it slows every allocation and keeps '
@@ -887,8 +950,12 @@ def main():
 
     except Exception as e:
         import traceback
+        crash = collect_crash(crash_probe, symbol_path, dll)
         emit({'event': 'error',
               'message': f'{type(e).__name__}: {e}',
+              'stage': stage,
+              'crash': crash,
+              'crash_summary': describe_crash(crash),
               'traceback': traceback.format_exc(),
               'logs': read_log_tail()})
     finally:

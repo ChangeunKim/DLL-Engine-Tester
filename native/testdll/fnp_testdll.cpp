@@ -4,8 +4,8 @@
 //   * scratch memory that is correctly freed,
 //   * a CPU-heavy stage (with an inlined helper), an allocation-heavy stage and a
 //     sleeping stage, so the speed profiler has distinct hot spots to find.
-// Input JSON may contain "leak":0 to disable the leaks and "work":N to scale the CPU
-// work. Output is returned through a BSTR (caller frees with SysFreeString).
+// Input JSON may contain "leak":0 to disable the leaks, "work":N to scale the CPU
+// work and "crash_at":N to fault (use-after-free read) on the N-th call of the process. Output is returned through a BSTR (caller frees with SysFreeString).
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -18,6 +18,7 @@
 
 #define FNP_API extern "C" __declspec(dllexport)
 
+static int g_calls = 0;
 static std::vector<char*> g_leakedBlocks;   // keeps the leaked pointers reachable
 static char* g_lazyTable = nullptr;
 
@@ -58,6 +59,15 @@ __declspec(noinline) static double scratch_work() {
     return s;   // tmp freed on return
 }
 
+// Reads a page that was committed and then released: a classic use-after-free that
+// faults only when the page is really gone (so it can surface on call N, not call 1).
+__declspec(noinline) static int read_released_page() {
+    char* page = (char*)VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    page[0] = 1;
+    VirtualFree(page, 0, MEM_RELEASE);
+    return *(volatile int*)(page + 0x18);   // access violation reading released memory
+}
+
 __declspec(noinline) static double parse_stage(int work) { return heavy_math(300000 * work); }
 __declspec(noinline) static double price_stage(int work) { return heavy_math(900000 * work); }
 __declspec(noinline) static double alloc_stage() {
@@ -90,6 +100,10 @@ FNP_API int fnp_test_run(const wchar_t* json, wchar_t** out) {
     int work = 1;
     size_t w = in.find(L"\"work\":");
     if (w != std::wstring::npos) work = std::max(1, _wtoi(in.c_str() + w + 7));
+
+    ++g_calls;
+    size_t cr = in.find(L"\"crash_at\":");
+    if (cr != std::wstring::npos && g_calls == _wtoi(in.c_str() + cr + 11)) *out = nullptr, (void)read_released_page();
 
     lazy_init_once();
     double a = parse_stage(work);

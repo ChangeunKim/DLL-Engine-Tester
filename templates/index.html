@@ -207,6 +207,11 @@
                         <input type="checkbox" id="prof-track">
                         <span>Track leak call stacks</span>
                     </label>
+                    <label class="profile-check"
+                        title="Reads the process heaps (HeapSummary) after every call to separate live allocations from committed pages. Turn it off to judge by private bytes only, as older versions did.">
+                        <input type="checkbox" id="prof-heap" checked>
+                        <span>Measure live heap</span>
+                    </label>
                     <button class="btn btn-primary profile-run-btn" id="prof-run-btn" onclick="runMemoryProfile()">
                         <span class="btn-text">Run Memory Profile</span>
                         <span class="loader" id="prof-loader" style="display: none;"></span>
@@ -522,9 +527,9 @@
     <!-- Cache-bussed JS Script -->
     <script src="{{ url_for('static', filename='script.js') }}?v=2.5"></script>
     <script src="{{ url_for('static', filename='symbols.js') }}?v=1.0"></script>
-    <script src="{{ url_for('static', filename='profiler.js') }}?v=2.0"></script>
-    <script src="{{ url_for('static', filename='speed.js') }}?v=1.0"></script>
-    <script src="{{ url_for('static', filename='help.js') }}?v=1.1"></script>
+    <script src="{{ url_for('static', filename='profiler.js') }}?v=2.1"></script>
+    <script src="{{ url_for('static', filename='speed.js') }}?v=1.1"></script>
+    <script src="{{ url_for('static', filename='help.js') }}?v=1.2"></script>
     <script src="{{ url_for('static', filename='history.js') }}?v=1.1"></script>
 </body>
 

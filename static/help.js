@@ -48,13 +48,15 @@
                 'Warmup: 앞쪽 N번은 판정에서 제외합니다. 지연 초기화나 캐시 예열은 정상 동작인데도 메모리를 늘리기 때문입니다. (기본 3)',
                 'Output buffer release: DLL이 반환한 문자열 버퍼를 누가 해제하는지 정합니다. DLL이 BSTR을 쓰면 SysFreeString, CoTaskMemAlloc을 쓰면 CoTaskMemFree를 고르세요. Do not free로 두면 DLL이 정상이어도 누수로 보입니다.',
                 'Track leak call stacks: 켜면 DLL의 할당/해제를 추적해 해제되지 않은 블록의 함수명과 파일:라인을 Leak sites에 보여줍니다. 실행이 느려지고 PDB가 필요합니다.',
+                'Measure live heap: 매 호출 뒤 프로세스 힙(HeapSummary)을 읽어 Live heap을 구합니다. 끄면 예전 방식(private bytes만)으로 판정합니다. 측정 때문에 DLL이 이상하게 동작하는지 의심될 때 끄고 비교해 보세요.',
                 'Run Memory Profile을 누르면 호출마다 차트가 실시간으로 갱신되고, Cancel로 중단할 수 있습니다.'
             ],
             tips: [
                 '가장 믿을 신호는 Live heap입니다. 이 선이 호출마다 계속 오르면 누수입니다.',
                 'private bytes만 늘고 Live heap이 평평하면 단편화나 할당자가 페이지를 쥐고 있는 것이라 보통 누수가 아닙니다. (Possible leak으로 표시됩니다.)',
                 'Leak sites에서 Leaks every call은 거의 모든 호출에서 블록이 남는 진짜 누수 후보, One-time은 한 번만 생긴 지연 초기화입니다.',
-                'Leak tracking 중의 실행 시간은 느려진 값이므로, 속도는 Speed Profiler로 재세요.'
+                'Leak tracking 중의 실행 시간은 느려진 값이므로, 속도는 Speed Profiler로 재세요.',
+                'DLL이 중간에 죽으면 몇 번째 호출/어느 단계(DLL 호출인지, 측정인지)에서 죽었는지와, 크래시가 난 함수·파일:라인·호출 스택(PDB 필요)이 표시됩니다.'
             ]
         },
 

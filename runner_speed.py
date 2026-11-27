@@ -57,6 +57,8 @@ def main():
     notes = []
     sampler = None
     dll = None
+    crash_probe = None
+    stage = 'loading the input'
     out_path = os.path.join(tempfile.gettempdir(), f'fnp_speed_{os.getpid()}.json')
 
     try:
@@ -64,6 +66,8 @@ def main():
             input_str = json.dumps(json.load(f))
 
         clock = rp.CycleClock()
+        crash_probe = rp.install_crash_probe()
+        stage = 'loading the DLL'
         t_load = time.perf_counter()
         dll = WinDLL(dll_path)
         load_ms = (time.perf_counter() - t_load) * 1000.0
@@ -97,6 +101,7 @@ def main():
         gc.disable()    # a collection landing inside a call would read as a slow call
         try:
             for i in range(iterations):
+                stage = f'DLL call {i + 1} (timing phase)'
                 digest, size, _ = call()
                 walls.append(call.last[0])
                 cpus.append(call.last[1])
@@ -122,6 +127,7 @@ def main():
         if sample and sampler_ok:
             from native_tools import SamplerProcess
             rp.emit({'event': 'phase', 'phase': 'sampling', 'sample_calls': sample_calls})
+            stage = 'starting the sampler'
             sampler = SamplerProcess(threading.get_native_id(), os.path.basename(dll_path),
                                      symbol_path, out_path, interval_us)
             err = sampler.wait_ready()
@@ -133,11 +139,13 @@ def main():
                 sampled_ms = []
                 sampled_cpu = []
                 for i in range(sample_calls):
+                    stage = f'DLL call {i + 1} (sampling phase)'
                     call()
                     sampled_ms.append(call.last[0])
                     sampled_cpu.append(call.last[1])
                     rp.emit({'event': 'iter', 'phase': 'sampling', 'i': i + 1,
                              'ms': round(call.last[0], 4)})
+                stage = 'collecting the samples'
                 rep = sampler.stop()
                 sampler = None
                 if isinstance(rep, str):
@@ -181,7 +189,9 @@ def main():
 
     except Exception as e:
         import traceback
+        crash = rp.collect_crash(crash_probe, symbol_path, dll)
         rp.emit({'event': 'error', 'message': f'{type(e).__name__}: {e}',
+                 'stage': stage, 'crash': crash, 'crash_summary': rp.describe_crash(crash),
                  'traceback': traceback.format_exc(), 'logs': rp.read_log_tail()})
     finally:
         if sampler is not None:

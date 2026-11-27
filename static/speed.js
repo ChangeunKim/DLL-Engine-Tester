@@ -723,6 +723,8 @@
         if (ev.event === 'done') { state.summary = ev.summary; state.logs = ev.logs || ''; return; }
         if (ev.event === 'error') {
             state.error = ev.message; state.logs = ev.logs || ''; state.trace = ev.traceback || '';
+            state.stage = ev.stage || ''; state.crash = ev.crash || null;
+            state.crashSummary = ev.crash_summary || '';
             return;
         }
         if (ev.event === 'exit') { state.exit = ev; }
@@ -758,10 +760,13 @@
         if (!state.summary) {
             var done = state.calls.length;
             var code = state.exit ? state.exit.returncode : null;
+            var failed = state.stage ? 'The run failed during ' + state.stage : 'The DLL call failed';
             var msg = state.error
-                ? 'The DLL call failed after ' + done + ' calls: ' + state.error.replace(/[.\s]+$/, '') + '.'
+                ? failed + ' after ' + done + ' timed calls: ' + state.error.replace(/[.\s]+$/, '') + '.' +
+                  (state.crashSummary ? ' Crash location: ' + state.crashSummary + '.' : '')
                 : 'The profile runner exited after ' + done + ' calls' + (code !== null ? ' (exit code ' + code + ')' : '') + '.';
-            var extra = [state.trace, state.exit && state.exit.stderr, state.logs, noise].filter(Boolean).join('\n\n');
+            var extra = [V.crashStackText(state.crash, state.crashSummary), state.trace,
+                state.exit && state.exit.stderr, state.logs, noise].filter(Boolean).join('\n\n');
             showFailure(done ? 'Run ended early' : 'Speed profile failed', msg, extra);
             setProgress(done ? 'Stopped at call ' + done : 'Failed', 0);
             return;
@@ -801,6 +806,7 @@
         state.calls = []; state.sampleDone = 0; state.phase = 'timing';
         state.summary = null; state.start = null; state.logs = ''; state.error = null; state.trace = '';
         state.exit = null; state.noise = []; state.finished = false; state.zoom = null;
+        state.stage = ''; state.crash = null; state.crashSummary = '';
         state.planned = iterations; state.warmup = warmup;
         state.sampling = sample; state.sampleCalls = sample ? sampleCalls : 0;
         $('spd-logs').hidden = true;

@@ -59,10 +59,43 @@ class Tracker:
         d.fnp_tracker_report.restype = c_int
         d.fnp_tracker_stats.argtypes = [POINTER(c_uint64)] * 4
         d.fnp_tracker_stats.restype = None
+        d.fnp_tracker_set_target.argtypes = [c_void_p]
+        d.fnp_tracker_set_target.restype = None
+        d.fnp_crash_install.restype = None
+        d.fnp_crash_clear.restype = None
+        d.fnp_crash_report.argtypes = [c_wchar_p]
+        d.fnp_crash_report.restype = c_int
         if not d.fnp_tracker_init():
             raise RuntimeError('fnp_tracker_init failed')
         self.heap = d.fnp_tracker_heap()
         self.attached = 0
+
+    def crash_install(self, hmodule=None):
+        """Record where hardware exceptions happen (see collect_crash)."""
+        if hmodule:
+            self.dll.fnp_tracker_set_target(hmodule)
+        self.dll.fnp_crash_install()
+
+    def crash_report(self, symbol_path=''):
+        """-> dict describing the last fatal exception (with symbolized stack), or None."""
+        import json
+        import tempfile
+        self.set_symbol_path(symbol_path)
+        fd, path = tempfile.mkstemp(prefix='fnp_crash_', suffix='.json')
+        os.close(fd)
+        try:
+            rc = self.dll.fnp_crash_report(path)
+            if rc != 0:
+                return None
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return None
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     def attach(self, hmodule):
         self.attached = self.dll.fnp_tracker_attach(hmodule)
