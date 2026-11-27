@@ -98,17 +98,46 @@ async function executeDll() {
 }
 
 // Use Native Windows File Explorer pop-up
+// The file dialog remembers where it was last opened, per KIND of file, so choosing
+// a JSON after a DLL does not reopen in the DLL's folder. DLL and PDB share one
+// remembered folder (they live together); JSON has its own.
+const BROWSE_DIR_KEYS = { 'dll-path': 'fnp_dir_bin', 'pdb-path': 'fnp_dir_bin', 'json-path': 'fnp_dir_json' };
+
+function dirOfPath(p) {
+    p = (p || '').trim();
+    const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
+    return i > 0 ? p.slice(0, i) : '';
+}
+
+function browseStartDir(inputId, explicitDir) {
+    if (explicitDir) return explicitDir;
+    let remembered = '';
+    try { remembered = localStorage.getItem(BROWSE_DIR_KEYS[inputId] || '') || ''; } catch (e) { /* private mode */ }
+    // Fall back to the folder of what is already in the field; the server supplies
+    // a default (e.g. the project's JSON folder) when this is empty or gone.
+    return remembered || dirOfPath(document.getElementById(inputId).value);
+}
+
+function rememberBrowseDir(inputId, chosenPath) {
+    const key = BROWSE_DIR_KEYS[inputId];
+    const dir = dirOfPath(chosenPath);
+    if (!key || !dir) return;
+    try { localStorage.setItem(key, dir); } catch (e) { /* private mode */ }
+}
+
 async function openFileBrowser(inputId, extFilter, initialDir = '') {
     document.getElementById('status-badge').className = 'status-badge running';
     document.getElementById('status-badge').textContent = 'Waiting for File Selection...';
     
     try {
-        const url = `/api/browse?ext=${extFilter}&initialdir=${encodeURIComponent(initialDir)}`;
+        const startDir = browseStartDir(inputId, initialDir);
+        const url = `/api/browse?ext=${extFilter}&initialdir=${encodeURIComponent(startDir)}`;
         const response = await fetch(url);
         const result = await response.json();
         
         if (result.status === 'success' && result.path) {
             document.getElementById(inputId).value = result.path;
+            rememberBrowseDir(inputId, result.path);
             document.getElementById('status-badge').className = 'status-badge success';
             document.getElementById('status-badge').textContent = 'File Selected';
             

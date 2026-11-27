@@ -30,6 +30,15 @@ def native_browse():
     # Opens native Windows File Explorer using a subprocess so it doesn't block Flask threads
     ext = request.args.get('ext', '*')
     initialdir = request.args.get('initialdir', '')
+
+    # Always hand the dialog an explicit folder. With none, Windows reopens wherever
+    # the previous dialog of this program was (the DLL's folder when picking a JSON).
+    if not initialdir or not os.path.isdir(initialdir):
+        project_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'JSON')
+        if ext == '.json' and os.path.isdir(project_json):
+            initialdir = project_json
+        else:
+            initialdir = os.path.dirname(os.path.abspath(__file__))
     
     filetypes_code = "()"
     if ext == '.dll':
