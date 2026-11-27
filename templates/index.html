@@ -8,7 +8,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.9">
 </head>
 
 <body>
@@ -24,7 +24,7 @@
 
         <div class="content">
             <div class="panel controls-panel">
-                <div class="section-title">Configuration</div>
+                <div class="section-title">Configuration <span class="help" data-help="config"></span></div>
 
                 <!-- DLL Path -->
                 <div class="form-group">
@@ -129,7 +129,7 @@
 
             <div class="panel output-panel">
                 <div class="section-header">
-                    <div class="section-title">Execution Output</div>
+                    <div class="section-title">Execution Output <span class="help" data-help="output"></span></div>
                     <span class="status-badge" id="status-badge">Idle</span>
                 </div>
                 <div id="output-terminal" class="terminal-window" style="height: 650px; min-height: 300px;">
@@ -166,7 +166,7 @@
                  ============================================================ -->
             <div class="panel profile-panel">
                 <div class="section-header">
-                    <div class="section-title">Memory Profiler</div>
+                    <div class="section-title">Memory Profiler <span class="help" data-help="memory"></span></div>
                     <span class="status-badge" id="prof-badge">Idle</span>
                 </div>
 
@@ -298,7 +298,7 @@
                     <!-- Leak sites: which call stacks still own memory -->
                     <div class="chart-card" id="prof-leaks-card" hidden>
                         <div class="chart-head">
-                            <div class="chart-title">Leak sites</div>
+                            <div class="chart-title">Leak sites <span class="help" data-help="leaks"></span></div>
                             <div class="chart-legend" id="prof-leaks-summary"></div>
                         </div>
                         <div class="chart-subtitle">
@@ -350,7 +350,7 @@
                  ============================================================ -->
             <div class="panel profile-panel speed-panel">
                 <div class="section-header">
-                    <div class="section-title">Speed Profiler</div>
+                    <div class="section-title">Speed Profiler <span class="help" data-help="speed"></span></div>
                     <span class="status-badge" id="spd-badge">Idle</span>
                 </div>
 
@@ -431,7 +431,7 @@
 
                         <div class="chart-card" id="spd-hot-card" hidden>
                             <div class="chart-head">
-                                <div class="chart-title">Where the time goes</div>
+                                <div class="chart-title">Where the time goes <span class="help" data-help="flame"></span></div>
                                 <div class="chart-legend" id="spd-legend-flame"></div>
                             </div>
                             <div class="chart-subtitle" id="spd-flame-sub">
@@ -496,6 +496,13 @@
                 </div>
             </div>
         </div>
+
+        <footer class="app-footer">
+            <div>&copy; 2026 <strong>FnPricing</strong>. All rights reserved.
+                <span class="footer-sep">|</span>본 소프트웨어는 FnPricing의 소유물입니다.</div>
+            <div>This software is the property of FnPricing.
+                <span class="footer-sep">|</span>Author: <strong>Changeun Kim</strong></div>
+        </footer>
     </div>
 
     <!-- Cache-bussed JS Script -->
@@ -503,6 +510,7 @@
     <script src="{{ url_for('static', filename='symbols.js') }}?v=1.0"></script>
     <script src="{{ url_for('static', filename='profiler.js') }}?v=2.0"></script>
     <script src="{{ url_for('static', filename='speed.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='help.js') }}?v=1.1"></script>
 </body>
 
 </html>
